@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-xray-api-svc
+  namespace: ai-xray
+spec:
+  type: ClusterIP
+  selector:
+    app: ai-xray-api
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http

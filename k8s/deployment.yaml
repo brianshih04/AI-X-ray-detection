@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-xray-api
+  namespace: ai-xray
+  labels:
+    app: ai-xray-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-xray-api
+  template:
+    metadata:
+      labels:
+        app: ai-xray-api
+    spec:
+      containers:
+      - name: api
+        image: localhost:5000/ai-xray-api:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        resources:
+          requests:
+            memory: "2Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            memory: "8Gi"
+            nvidia.com/gpu: "1"
+        env:
+        - name: MODEL_PATH
+          value: "/app/models/densenet121.pth"
+        - name: DATA_PATH
+          value: "/data"
+        volumeMounts:
+        - name: model-storage
+          mountPath: /app/models
+        - name: data-storage
+          mountPath: /data
+      volumes:
+      - name: model-storage
+        persistentVolumeClaim:
+          claimName: ai-xray-models-pvc
+      - name: data-storage
+        persistentVolumeClaim:
+          claimName: ai-xray-data-pvc

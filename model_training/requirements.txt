@@ -1,0 +1,22 @@
+# Chest X-ray Multi-label Classification Training Pipeline
+# Core dependencies
+torch>=2.0.0
+torchvision>=0.15.0
+pytorch-lightning>=2.0  # optional alternative
+numpy>=1.24.0
+pandas>=2.0.0
+scikit-learn>=1.2.0
+Pillow>=9.0.0
+tqdm>=4.65.0
+pyyaml>=6.0
+
+# Experiment tracking (install what you need)
+# tensorboard is included with PyTorch; for standalone:
+# tensorboard>=2.13.0
+
+# Weights & Biases (optional)
+# wandb>=0.15.0
+
+# ONNX export (optional)
+# onnx>=1.14.0
+# onnxruntime>=1.15.0

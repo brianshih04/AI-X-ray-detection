@@ -1,0 +1,92 @@
+# Chest X-ray Multi-label Classification — Config (NIH ChestX-ray14)
+
+data:
+  data_dir: /home/brian/ai-xray-detection/data
+  train_csv: train.csv
+  valid_csv: val.csv
+  img_size: 224
+  num_workers: 4
+  pin_memory: true
+  uncertain_policy: zero  # NIH has no uncertain labels
+
+labels:
+  - Atelectasis
+  - Cardiomegaly
+  - Consolidation
+  - Edema
+  - Effusion
+  - Emphysema
+  - Fibrosis
+  - Hernia
+  - Infiltration
+  - Mass
+  - Nodule
+  - Pleural_Thickening
+  - Pneumonia
+  - Pneumothorax
+  - No Finding
+
+model:
+  backbone: densenet121
+  pretrained: true
+  num_classes: 15
+  freeze_backbone_epochs: 3
+  dropout: 0.2
+
+training:
+  num_epochs: 30
+  batch_size: 32
+  lr_head: 0.001
+  lr_backbone: 0.0001
+  weight_decay: 0.01
+  optimizer: adamw
+  betas: [0.9, 0.999]
+  amp: true
+  grad_accum_steps: 1
+  clip_grad_norm: 1.0
+
+loss:
+  type: bce_with_logits
+  use_pos_weight: true
+
+scheduler:
+  type: cosine
+  T_max: 30
+  eta_min: 0.00001
+
+augmentation:
+  random_horizontal_flip: 0.5
+  random_affine: true
+  random_rotation: 10
+  random_translate: [0.05, 0.05]
+  random_scale: [0.9, 1.1]
+  color_jitter: 0.1
+  random_erasing: 0.0
+
+callbacks:
+  early_stopping:
+    enabled: true
+    patience: 7
+    min_delta: 0.001
+    monitor: val_auc
+    mode: max
+  checkpoint:
+    monitor: val_auc
+    mode: max
+    save_best: true
+    save_last: true
+    save_top_k: 3
+
+tracking:
+  type: csv  # simple CSV logging (no W&B)
+  log_interval: 10
+
+export:
+  onnx: true
+  onnx_opset: 17
+  dynamic_batch: true
+  torchscript: true
+
+output:
+  dir: /home/brian/ai-xray-detection/models/densenet121_nih
+  seed: 42
