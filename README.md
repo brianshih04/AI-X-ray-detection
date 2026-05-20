@@ -10,7 +10,7 @@
 
 本系統實作了從資料前處理、模型訓練到 API 推論部署的完整端到端管線。使用者上傳胸腔 X 光片後，系統自動辨識 **14 種常見胸腔疾病**，回傳各疾病的信心分數與建議，供臨床人員參考。
 
-**14 種可辨識疾病標籤：**
+**15 種可辨識標籤（14 種疾病 + No Finding）：**
 
 ```
 Atelectasis（肺不張）         Cardiomegaly（心臟肥大）
@@ -20,6 +20,7 @@ Fibrosis（肺纖維化）          Hernia（橫膈膜疝氣）
 Infiltration（肺浸潤）         Mass（腫塊）
 Nodule（肺結節）              Pleural_Thickening（肋膜增厚）
 Pneumonia（肺炎）             Pneumothorax（氣胸）
+No Finding（無異常發現）
 ```
 
 > ⚠️ **免責聲明**：本系統僅供學術研究與技術展示用途，不得作為臨床診斷依據。
@@ -90,8 +91,8 @@ Pneumonia（肺炎）             Pneumothorax（氣胸）
 ## 🛠️ 技術棧
 
 **機器學習**
-- PyTorch 2.2+ / torchvision — 模型訓練與推論
-- ONNX Runtime 1.18+ — 高效推論引擎
+- PyTorch 2.13 (nightly, cu130) — 模型訓練與推論（NVIDIA GB10 DGX Spark, aarch64）
+- ONNX (opset 17) — 模型匯出格式
 - scikit-learn — 評估指標計算
 - OpenCV (CLAHE) — 影像前處理
 - numpy / pandas — 資料處理
@@ -99,14 +100,16 @@ Pneumonia（肺炎）             Pneumothorax（氣胸）
 **後端 API**
 - FastAPI 0.115 — 非同步 Web 框架
 - SQLAlchemy 2.0 + Alembic — ORM + 資料庫遷移
-- PostgreSQL — 關聯式資料庫
+- PostgreSQL — 關聯式資料庫（待部署）
 - python-jose + passlib — JWT 認證 + bcrypt 密碼雜湊
 - slowapi — API 速率限制
+- uvicorn — ASGI 伺服器
 
 **基礎設施**
-- Docker (python:3.11-slim) — 容器化
-- Kubernetes — 叢集編排與 GPU 調度
-- uvicorn — ASGI 伺服器
+- Docker (python:3.12-slim) — 容器化（image: `ai-xray-api:latest`, 1.21GB）
+- Kubernetes (minikube v1.38.1, K8S v1.35.1) — 叢集編排，namespace `ai-xray`
+- Cloudflare Tunnel — 外部存取（`ai-x-ray-detection.avision-gb10.org`）
+- NVIDIA DGX Spark (GB10) — 訓練與推論主機（aarch64, CUDA 13.2, 3.6TB）
 
 ---
 
@@ -189,13 +192,19 @@ AI-X-ray-detection/
 
 **系統**
 - Python 3.11+
-- PostgreSQL 14+
-- CUDA 11.8+（GPU 訓練/推論選配）
+- Docker & Kubernetes (minikube)
+- PostgreSQL 14+（待部署）
 
-**訓練 GPU 建議**
-- 最低：NVIDIA RTX 3060 (12GB VRAM) — 需梯度累積
-- 建議：NVIDIA RTX 4090 (24GB VRAM) — batch_size=32 穩定訓練
-- 雲端：NVIDIA A100 (40GB) — 全資料集完整訓練
+**訓練硬體（已使用）**
+- NVIDIA DGX Spark (GB10) — aarch64, 20-core ARM, CUDA 13.2, 3.6TB
+- PyTorch 2.13.0.dev+cu130 (sm_121 compute capability)
+
+**訓練結果**
+- 模型：DenseNet-121 (Transfer Learning, ImageNet pretrained)
+- Mean AUROC：**0.812**
+- 最佳類別：Edema (0.914)
+- Early Stopping @ Epoch 8 (patience=7, val_auc 無進步)
+- 模型大小：81MB (.pth), 28.1MB (.onnx)
 
 ---
 
@@ -284,27 +293,50 @@ uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 # http://localhost:8000/redoc       (ReDoc)
 ```
 
+> **💡 簡化版 API（無 DB 依賴，已部署）**  
+> 在 GB10 上的 `api_build/` 目錄有一個簡化版 API，直接使用 PyTorch 載入 `.pth` 模型推論，不需要 PostgreSQL。已封裝為 Docker image 並部署至 K8S。
+
 ### 5. Docker 部署
 
 ```bash
-# 建置映像
-docker build -t ai-xray-api:latest -f api/Dockerfile api/
+# 在 GB10 上建置映像（使用 minikube docker daemon）
+eval $(minikube docker-env)
+docker build -t ai-xray-api:latest -f api_build/Dockerfile api_build/
 
-# 執行容器
-docker run -d \
-  -p 8000:8000 \
-  -e DATABASE_URL=postgresql://user:pass@db:5432/chestxray \
-  -e MODEL_PATH=/app/models/model.onnx \
-  -v /path/to/models:/app/models \
-  ai-xray-api:latest
+# 映像資訊
+# ai-xray-api:latest — 1.21GB, python:3.12-slim + PyTorch + DenseNet-121 模型
 ```
 
 ### 6. Kubernetes 部署
 
 ```bash
+# 在 GB10 minikube 上部署
 kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/deployment.yaml
 kubectl apply -f k8s/service.yaml
+
+# 查看部署狀態
+kubectl get pods -n ai-xray
+# ai-xray-api-xxxxxxxxx-yyyyy   1/1     Running
+
+# NodePort 測試（內部）
+curl http://192.168.49.2:30800/health
+# {"status":"ok","model_loaded":true}
+```
+
+### 7. 外部存取（Cloudflare Tunnel）
+
+```bash
+# GB10 上的 cloudflared systemd service 已設定 tunnel
+# DNS: ai-x-ray-detection.avision-gb10.org → Cloudflare Tunnel → K8S NodePort:30800
+
+# 從外部測試
+curl https://ai-x-ray-detection.avision-gb10.org/health
+# {"status":"ok","model_loaded":true}
+
+# 上傳 X 光片進行判讀
+curl -X POST https://ai-x-ray-detection.avision-gb10.org/api/predict \
+  -F "file=@chest_xray.png"
 ```
 
 ---
@@ -395,12 +427,16 @@ curl -X POST http://localhost:8000/api/predict \
 ## 🗺️ Roadmap
 
 - [x] NIH ChestX-ray14 資料前處理管線
-- [x] DenseNet-121 多標籤分類模型訓練
+- [x] DenseNet-121 多標籤分類模型訓練（Mean AUROC: 0.812）
 - [x] ONNX / TorchScript 模型匯出
 - [x] FastAPI 推論 API（JWT 認證、Rate Limiting）
 - [x] PostgreSQL 資料庫 schema + Alembic 遷移
-- [x] Docker 容器化 + Kubernetes 部署配置
+- [x] Docker 容器化（`ai-xray-api:latest`, 1.21GB）
+- [x] Kubernetes 部署（minikube v1.38.1, namespace `ai-xray`）
+- [x] Cloudflare Tunnel 外部存取（`ai-x-ray-detection.avision-gb10.org`）
 - [ ] 前端網頁介面（React）
+- [ ] Ingress Controller（取代 NodePort + port-forward）
+- [ ] PostgreSQL 部署至 K8S（StatefulSet + PVC）
 - [ ] EfficientNet-B3 / ViT 模型實驗
 - [ ] DICOM 格式完整支援（pydicom 整合）
 - [ ] 模型效能基準測試與結果發布
