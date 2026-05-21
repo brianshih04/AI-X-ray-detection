@@ -18,7 +18,6 @@ import cv2
 import pydicom
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine, Column, String, Float, DateTime, Integer, JSON, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -171,7 +170,7 @@ async def predict(file: UploadFile = File(...)):
     logits = session.run(None, {"image": inp})[0][0]
     probs = 1.0 / (1.0 + np.exp(-logits))
     elapsed_ms = (time.perf_counter() - start) * 1000
-    results = [{"label": l, "confidence": round(float(p), 4)} for l, p in zip(LABELS, probs)]
+    results = [{"label": lbl, "confidence": round(float(p), 4)} for lbl, p in zip(LABELS, probs)]
     results.sort(key=lambda x: x["confidence"], reverse=True)
     top = results[0]
     if db_ready:
@@ -249,7 +248,7 @@ async def gradcam(file: UploadFile = File(...), label: str = None):
     start = time.perf_counter()
     logits = session.run(None, {"image": inp})[0][0]
     probs = 1.0 / (1.0 + np.exp(-logits))
-    results = [{"label": l, "confidence": round(float(p), 4)} for l, p in zip(LABELS, probs)]
+    results = [{"label": lbl, "confidence": round(float(p), 4)} for lbl, p in zip(LABELS, probs)]
     results.sort(key=lambda x: x["confidence"], reverse=True)
 
     # Use specified label or top prediction

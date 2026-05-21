@@ -40,7 +40,7 @@ def make_jpeg_bytes(width=224, height=224) -> bytes:
 def make_dicom_bytes(width=224, height=224) -> bytes:
     """Create a minimal DICOM file with pixel data."""
     import pydicom
-    from pydicom.dataset import Dataset, FileDataset
+    from pydicom.dataset import FileDataset
     from pydicom.uid import ExplicitVRLittleEndian
 
     file_meta = pydicom.Dataset()
