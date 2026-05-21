@@ -16,8 +16,9 @@ from onnx import numpy_helper
 from PIL import Image
 import cv2
 import pydicom
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from sqlalchemy import create_engine, Column, String, Float, DateTime, Integer, JSON, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -95,6 +96,56 @@ def load_model():
 
 ALLOWED_TYPES = {"image/png", "image/jpeg", "image/jpg", "application/dicom"}
 
+# ---------------------------------------------------------------------------
+# API Key Authentication & Rate Limiting
+# ---------------------------------------------------------------------------
+_api_keys_str = os.environ.get("API_KEYS", "")
+VALID_API_KEYS: set[str] = {k.strip() for k in _api_keys_str.split(",") if k.strip()}
+AUTH_ENABLED = bool(VALID_API_KEYS)
+
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+class RateLimiter:
+    """Simple in-memory sliding-window rate limiter (stdlib only)."""
+
+    def __init__(self, max_requests: int = 100, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window = window_seconds
+        self._timestamps: dict[str, list[float]] = {}
+
+    def is_limited(self, key: str) -> bool:
+        now = time.time()
+        timestamps = self._timestamps.get(key, [])
+        cutoff = now - self.window
+        # Prune old entries
+        timestamps = [t for t in timestamps if t > cutoff]
+        if len(timestamps) >= self.max_requests:
+            self._timestamps[key] = timestamps
+            return True
+        timestamps.append(now)
+        self._timestamps[key] = timestamps
+        return False
+
+
+_rate_limiter = RateLimiter(max_requests=100, window_seconds=60)
+
+
+async def api_key_auth(api_key: str = Depends(_api_key_header)):
+    """FastAPI dependency: validate API key and enforce rate limit."""
+    if not AUTH_ENABLED:
+        return None
+    if not api_key or api_key not in VALID_API_KEYS:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    if _rate_limiter.is_limited(api_key):
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Max 100 requests per minute.",
+        )
+    return api_key
+
+# ---------------------------------------------------------------------------
+
 def is_dicom(data: bytes) -> bool:
     """Check if bytes look like a DICOM file."""
     # DICM magic at offset 128
@@ -146,7 +197,14 @@ async def lifespan(app):
     yield
 
 app = FastAPI(title="Chest X-ray ONNX API", version="2.0.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+_cors_origins_str = os.environ.get("CORS_ORIGINS", "")
+_cors_origins = [o.strip() for o in _cors_origins_str.split(",") if o.strip()] or ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/health")
 async def health():
@@ -154,7 +212,7 @@ async def health():
             "providers": session.get_providers() if session else []}
 
 @app.post("/api/predict")
-async def predict(file: UploadFile = File(...)):
+async def predict(file: UploadFile = File(...), _auth=Depends(api_key_auth)):
     if session is None:
         raise HTTPException(503, "Model not loaded")
     if file.content_type and file.content_type not in ALLOWED_TYPES:
@@ -191,12 +249,12 @@ async def predict(file: UploadFile = File(...)):
             "top_confidence": top["confidence"], "processing_time_ms": round(elapsed_ms, 2)}
 
 @app.get("/api/model/info")
-async def model_info():
+async def model_info(_auth=Depends(api_key_auth)):
     return {"model": "DenseNet-121 (ONNX)", "labels": LABELS, "input_size": [1,3,224,224],
             "providers": session.get_providers() if session else []}
 
 @app.get("/api/predictions")
-async def list_predictions(limit: int = 20):
+async def list_predictions(limit: int = 20, _auth=Depends(api_key_auth)):
     if not db_ready:
         raise HTTPException(503, "Database not available")
     s = None
@@ -231,7 +289,7 @@ def generate_cam(inp, label_idx):
     return cam
 
 @app.post("/api/gradcam")
-async def gradcam(file: UploadFile = File(...), label: str = None):
+async def gradcam(file: UploadFile = File(...), label: str = None, _auth=Depends(api_key_auth)):
     """Generate Grad-CAM heatmap overlay for an X-ray image."""
     if cam_session is None or cam_weights is None:
         raise HTTPException(503, "CAM model not loaded")

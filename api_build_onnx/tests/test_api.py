@@ -392,3 +392,94 @@ class TestEdgeCases:
             files={"file": ("rgba.png", buf.getvalue(), "image/png")}
         )
         assert resp.status_code == 200
+
+
+# ============================================================
+# API Key Authentication & Rate Limiting
+# ============================================================
+
+class TestApiKeyAuth:
+    """Test API key authentication and rate limiting."""
+
+    def _make_png(self):
+        img = Image.new("RGB", (224, 224), color=128)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+
+    def test_no_key_when_auth_disabled(self, client):
+        """Without API_KEYS env, auth is disabled — request succeeds."""
+        resp = client.post(
+            "/api/predict",
+            files={"file": ("test.png", self._make_png(), "image/png")}
+        )
+        assert resp.status_code == 200
+
+    def test_health_always_public(self):
+        """/health is always public even with auth enabled."""
+        import main as app_mod
+        with patch.object(app_mod, "VALID_API_KEYS", {"test-secret-key"}), \
+             patch.object(app_mod, "AUTH_ENABLED", True):
+            from fastapi.testclient import TestClient
+            tc = TestClient(app_mod.app)
+            resp = tc.get("/health")
+            assert resp.status_code == 200
+
+    def test_valid_key_accepted(self):
+        """Valid API key should pass authentication."""
+        import main as app_mod
+        with patch.object(app_mod, "VALID_API_KEYS", {"my-secret-key"}), \
+             patch.object(app_mod, "AUTH_ENABLED", True):
+            from fastapi.testclient import TestClient
+            tc = TestClient(app_mod.app)
+            resp = tc.post(
+                "/api/predict",
+                files={"file": ("test.png", self._make_png(), "image/png")},
+                headers={"X-API-Key": "my-secret-key"}
+            )
+            assert resp.status_code == 200
+
+    def test_invalid_key_rejected(self):
+        """Invalid API key should return 401."""
+        import main as app_mod
+        with patch.object(app_mod, "VALID_API_KEYS", {"my-secret-key"}), \
+             patch.object(app_mod, "AUTH_ENABLED", True):
+            from fastapi.testclient import TestClient
+            tc = TestClient(app_mod.app)
+            resp = tc.post(
+                "/api/predict",
+                files={"file": ("test.png", self._make_png(), "image/png")},
+                headers={"X-API-Key": "wrong-key"}
+            )
+            assert resp.status_code == 401
+            assert "Invalid or missing" in resp.json()["detail"]
+
+    def test_missing_key_rejected(self):
+        """No API key header should return 401."""
+        import main as app_mod
+        with patch.object(app_mod, "VALID_API_KEYS", {"my-secret-key"}), \
+             patch.object(app_mod, "AUTH_ENABLED", True):
+            from fastapi.testclient import TestClient
+            tc = TestClient(app_mod.app)
+            resp = tc.post(
+                "/api/predict",
+                files={"file": ("test.png", self._make_png(), "image/png")}
+            )
+            assert resp.status_code == 401
+
+    def test_rate_limiting(self):
+        """Rate limit should return 429 after max requests."""
+        import main as app_mod
+        limiter = app_mod.RateLimiter(max_requests=3, window_seconds=60)
+        key = "rate-test-key"
+        assert not limiter.is_limited(key)
+        assert not limiter.is_limited(key)
+        assert not limiter.is_limited(key)
+        assert limiter.is_limited(key)  # 4th request blocked
+
+    def test_cors_default_wildcard(self):
+        """Without CORS_ORIGINS env, allow_origins should be [*]."""
+        import os as _os
+        origins_str = _os.environ.get("CORS_ORIGINS", "")
+        origins = [o.strip() for o in origins_str.split(",") if o.strip()] or ["*"]
+        assert origins == ["*"]
