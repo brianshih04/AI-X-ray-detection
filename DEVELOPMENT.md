@@ -426,10 +426,10 @@ const API_BASE = window.location.port === '3000'
 
 dev 分支有獨立的測試環境部署：
 
-- **網址**: https://ai-xray-test.avision-gb10.org
+- **網址**: https://dev-ai-x-ray-detection.avision-gb10.org
 - **NodePort**: 30081
 - **K8S deployments**: `ai-xray-api-test` (image: `ai-xray-api:dicom`), `ai-xray-frontend-test`
-- **Cloudflare tunnel**: `ai-xray-test.avision-gb10.org` → `192.168.49.2:30081`
+- **Cloudflare tunnel**: `dev-ai-x-ray-detection.avision-gb10.org` → `192.168.49.2:30081`
 
 > 測試環境與正式環境完全獨立，不共用 deployments 或 services。正式環境不受影響。
 

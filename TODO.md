@@ -39,7 +39,7 @@
   - docker-compose: API (:8000) + Frontend (:3000) + PostgreSQL (:5432)
   - start.bat: Windows 一鍵啟動，auto venv + pip + uvicorn + http.server
   - 前端 API_BASE 自動偵測 (:3000 → :8000)
-- [x] 測試環境 ai-xray-test.avision-gb10.org (NodePort 30081, 獨立 K8S deployments)
+- [x] 測試環境 dev-ai-x-ray-detection.avision-gb10.org (NodePort 30081, 獨立 K8S deployments)
 - [x] CI/CD Pipeline (GitHub Actions)
   - Lint: ruff check
   - Test: pytest 29 tests × Python 3.10/3.11/3.12 (矩陣測試)
@@ -68,7 +68,7 @@
   - 目前 API 完全公開，任何人都可呼叫
 - [ ] CORS 限制
   - 目前 `allow_origins=["*"]`，改為白名單域名
-  - 允許: `ai-x-ray-detection.avision-gb10.org`, `ai-xray-test.avision-gb10.org`, `localhost`
+  - 允許: `ai-x-ray-detection.avision-gb10.org`, `dev-ai-x-ray-detection.avision-gb10.org`, `localhost`
 - [ ] 前端永久化部署
   - ConfigMap 掛載 index.html (pod 重啟不丟失)
   - 或 Init Container 從 git 拉取

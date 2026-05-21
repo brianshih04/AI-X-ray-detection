@@ -42,7 +42,7 @@ spec:
               key: api-keys
               optional: true
         - name: CORS_ORIGINS
-          value: "https://ai-x-ray-detection.avision-gb10.org,https://ai-xray-test.avision-gb10.org"
+          value: "https://ai-x-ray-detection.avision-gb10.org,https://dev-ai-x-ray-detection.avision-gb10.org"
         livenessProbe:
           httpGet:
             path: /health

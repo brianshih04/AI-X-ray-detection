@@ -26,9 +26,9 @@
 - **start.bat**: Windows 一鍵啟動腳本
   - 自動建立 venv → pip install → 啟動 uvicorn (`:8000`) + http.server (`:3000`)
   - 不需要 Docker 或 PostgreSQL
-- **測試環境**: `ai-xray-test.avision-gb10.org` (NodePort 30081)
+- **測試環境**: `dev-ai-x-ray-detection.avision-gb10.org` (NodePort 30081)
   - 獨立 K8S deployments: `ai-xray-api-test`, `ai-xray-frontend-test`
-  - Cloudflare tunnel: `ai-xray-test.avision-gb10.org` → `192.168.49.2:30081`
+  - Cloudflare tunnel: `dev-ai-x-ray-detection.avision-gb10.org` → `192.168.49.2:30081`
 
 ### Changed
 - **前端 API_BASE 自動偵測**: Frontend 在 `:3000` 執行時自動指向 API `:8000`，無需手動設定
