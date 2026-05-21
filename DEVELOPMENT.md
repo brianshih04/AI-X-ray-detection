@@ -428,8 +428,9 @@ dev 分支有獨立的測試環境部署：
 
 - **網址**: https://dev-ai-x-ray-detection.avision-gb10.org
 - **NodePort**: 30081
-- **K8S deployments**: `ai-xray-api-test` (image: `ai-xray-api:dicom`), `ai-xray-frontend-test`
+- **K8S deployments**: `ai-xray-api-test` (image: `ai-xray-api:auth`), `ai-xray-frontend-test`
 - **Cloudflare tunnel**: `dev-ai-x-ray-detection.avision-gb10.org` → `192.168.49.2:30081`
+- **功能**: 判讀後自動原圖+熱力圖並排、PDF 中文報告、DICOM 支援、API Key auth (opt-in)
 
 > 測試環境與正式環境完全獨立，不共用 deployments 或 services。正式環境不受影響。
 

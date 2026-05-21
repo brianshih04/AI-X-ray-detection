@@ -7,6 +7,29 @@
 
 ---
 
+## [0.6.0] - 2026-05-21
+
+### Added
+- **API Key 認證 + Rate Limiting**: Header-based `X-API-Key`，env `API_KEYS` 設定
+  - Opt-in 設計：未設定 `API_KEYS` 環境變數 = 認證關閉，完全向後相容
+  - `/health` endpoint 永遠公開，不需 API Key
+  - 速率限制：100 req/min per key（env 可調）
+- **CORS 白名單**: env `CORS_ORIGINS` 設定允許的域名（逗號分隔），預設 `["*"]`
+- **36 單元測試**: pytest 完整覆蓋（predict, gradcam, DICOM, auth, rate limiting, edge cases）
+- **CI/CD Pipeline**: GitHub Actions — lint (ruff) + test (3.10/3.11/3.12) + Docker build
+
+### Changed
+- **Dev URL 更名**: `ai-xray-test.avision-gb10.org` → `dev-ai-x-ray-detection.avision-gb10.org`
+  - 一層子域名相容 Cloudflare Universal SSL
+  - Cloudflare tunnel 新增 CNAME `dev-ai-x-ray-detection` → `192.168.49.2:30081`
+- **UI 判讀流程優化**: 判讀後自動顯示左原圖 + 右熱力圖（自動呼叫 Grad-CAM API）
+- **PDF 報告重寫**: Canvas 渲染中文（NotoSansTC/PingFang TC），影像按原比例顯示
+  - 報告含：標題 banner + 診斷卡片 + 原圖/熱力圖並排 + 14 種疾病彩色條狀圖 + 免責聲明
+- **移除按鈕修正**: 按「移除」後按鈕文字還原為「開始判讀」
+- K8S `deployment.yaml` 新增 `API_KEYS` + `CORS_ORIGINS` 環境變數
+
+---
+
 ## [0.5.0] - 2026-05-21
 
 ### Added

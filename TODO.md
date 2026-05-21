@@ -32,7 +32,7 @@
   - /api/predict 和 /api/gradcam 均支援 DICOM
 - [x] 手機版 RWD (24 條 responsive CSS rules, max-width: 640px)
 - [x] 結果匯出 (PDF 報告)
-  - jsPDF CDN，標題 + 最高信心診斷 + 15 疾病條狀圖 + 免責聲明
+  - Canvas 中文渲染 (NotoSansTC/PingFang TC)，含原圖 + 熱力圖 + 彩色條狀圖 + 免責聲明
 - [x] 支援批次上傳 (多檔案選擇器，循序 API 呼叫，即時進度)
 - [x] Input validation 加強 (50MB 檔案大小上限 + DICOM 副檔名檢查)
 - [x] 本地開發環境 (docker-compose.yml + start.bat)
@@ -46,7 +46,7 @@
   - Docker Build: Frontend (nginx:alpine) + API (python:3.12-slim) 驗證
   - pip cache + Docker layer cache 加速
   - push/PR to main, dev 自動觸發
-- [x] 單元測試 (29 pytest, mock ONNX session, DICOM + predict + gradcam + edge cases)
+- [x] 單元測試 (36 pytest, mock ONNX session, DICOM + predict + gradcam + auth + rate limiting + edge cases)
 
 ## 暫緩 ⏸️
 
@@ -61,18 +61,18 @@
 
 ### 🔥 高優先
 
-- [ ] API Key 認證 + Rate limiting
-  - Header-based API Key (X-API-Key)
-  - FastAPI middleware + SQLite/PostgreSQL key store
-  - Rate limiting: per-key request quota (e.g. 100/min)
-  - 目前 API 完全公開，任何人都可呼叫
-- [ ] CORS 限制
-  - 目前 `allow_origins=["*"]`，改為白名單域名
+- [x] API Key 認證 + Rate limiting
+  - Header-based `X-API-Key`，env `API_KEYS` 設定 (opt-in，未設定 = 關閉)
+  - Rate limiting: 100 req/min per key（記憶體滑動窗口）
+  - `/health` 永遠公開
+- [x] CORS 白名單
+  - env `CORS_ORIGINS` 逗號分隔，預設 `["*"]`
   - 允許: `ai-x-ray-detection.avision-gb10.org`, `dev-ai-x-ray-detection.avision-gb10.org`, `localhost`
-- [ ] 前端永久化部署
-  - ConfigMap 掛載 index.html (pod 重啟不丟失)
-  - 或 Init Container 從 git 拉取
-  - 目前 prod + test 皆用 kubectl cp 到 /tmp，pod 重啟就沒了
+- [x] 36 單元測試 (predict, gradcam, DICOM, auth, rate limiting, edge cases)
+- [x] CI/CD Pipeline (GitHub Actions: lint + test × 3 + docker build)
+- [x] UI 判讀流程優化 — 判讀後自動顯示原圖 + 熱力圖並排
+- [x] PDF 報告重寫 — Canvas 中文渲染 + 影像原比例 + 彩色條狀圖
+- [x] Dev URL 更名 → `dev-ai-x-ray-detection.avision-gb10.org`
 
 ### 📦 中優先
 

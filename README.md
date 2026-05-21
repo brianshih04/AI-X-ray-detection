@@ -31,7 +31,7 @@
 - 🏭 **Production**: 👉 **https://ai-x-ray-detection.avision-gb10.org**
 - 🧪 **Test (dev)**: 👉 **https://dev-ai-x-ray-detection.avision-gb10.org** (NodePort 30081)
 
-直接上傳胸腔 X 光片，即可獲得 14 種疾病的預測結果。也可使用 `data/test_images/` 中的 100 張範例影像進行測試。
+直接上傳胸腔 X 光片，即可獲得 14 種疾病的預測結果 + 熱力圖並排顯示。也可使用 `data/test_images/` 中的 100 張範例影像進行測試。
 
 ```bash
 # 或用 curl 測試
