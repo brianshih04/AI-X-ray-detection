@@ -22,13 +22,14 @@
 
 | 項目 | 版本 | 備註 |
 |------|------|------|
-| Python | 3.11+ | 建議 3.11.x |
-| PyTorch | 2.13+ (nightly cu130) | GB10 sm_121 需 nightly |
-| CUDA | 13.2+ | NVIDIA GB10 (DGX Spark) |
-| PostgreSQL | 15+ | 資料庫 |
-| Docker | 29+ | 容器化 |
-| minikube | 1.38+ | 本地 K8S |
-| kubectl | 1.36+ | K8S CLI |
+|| Python | 3.12+ | API 容器使用 3.12-slim ||
+|| PyTorch | 2.13+ (nightly cu130) | GB10 sm_121 需 nightly (訓練用) ||
+|| ONNX Runtime | 1.24.4 | 推論引擎 ||
+|| CUDA | 13.2+ | NVIDIA GB10 (DGX Spark) ||
+|| PostgreSQL | 15+ | 預測結果資料庫 ||
+|| Docker | 29+ | 容器化 (host) ||
+|| minikube | 1.35+ | 本地 K8S (containerd) ||
+|| kubectl | 1.35+ | K8S CLI ||
 
 ---
 
@@ -49,16 +50,17 @@ pip install -r model_training/requirements.txt
 pip install -r api/requirements.txt
 ```
 
-### 遠端訓練主機（GB10）
+### 遠端部署主機（GB10）
 
 ```bash
 # SSH 連線（透過 Cloudflare Tunnel）
 ssh -o ProxyCommand="cloudflared access ssh --hostname ssh.avision-gb10.org" \
-    brian@ssh.avision-gb10.org
+    avuser@ssh.avision-gb10.org
+# 密碼: Brian0054$
 
-# 專案路徑：~/ai-xray-detection/
+# 專案路徑：~/projects/ai-xray-detection/
 # PyTorch nightly 已安裝在 venv 中
-source ~/ai-xray-detection/venv/bin/activate
+source ~/projects/ai-xray-detection/venv/bin/activate
 
 # 確認 GPU
 python -c "import torch; print(torch.cuda.get_device_name(0))"
@@ -323,44 +325,76 @@ export:
 
 ## 後端 API 開發
 
-### FastAPI 結構
+> 目前使用 `api_build_onnx/` (ONNX Runtime, 406MB)。舊版 `api_build/` (PyTorch, 5.15GB) 已停用。
+> 完整版 `api/` (含認證、rate limit) 為未來規劃。
+
+### FastAPI 結構 (api_build_onnx/)
 
 ```
-api/src/
-├── main.py              # FastAPI app, CORS, middleware
-├── config.py            # Settings (env vars)
-├── database.py          # AsyncSession factory
-├── schemas.py           # Pydantic request/response models
-├── crud.py              # Async CRUD operations
-├── api/
-│   ├── core.py          # /predict, /history, /stats
-│   └── auth.py          # /login, /register
-├── services/
-│   ├── auth.py          # JWT token 生成/驗證
-│   ├── preprocessing.py # 影像 resize/normalize
-│   └── inference.py     # ONNX/TorchScript 推論
-└── middleware/
-    └── rate_limit.py    # IP-based rate limiting
+api_build_onnx/
+├── main.py              # FastAPI app, ONNX 推論, PostgreSQL 寫入
+├── requirements.txt     # onnxruntime, fastapi, uvicorn, sqlalchemy, psycopg2-binary
+├── Dockerfile           # CPU 版 (python:3.12-slim, 406MB)
+├── Dockerfile.gpu       # GPU 版 (含 CUDA libs + onnxruntime-gpu, 598MB)
+└── models/
+    ├── best_model.onnx       # ONNX graph (1.1MB)
+    └── best_model.onnx.data  # ONNX weights (27MB)
+```
+
+### API Endpoints
+
+| Method | Path | 說明 |
+|--------|------|------|
+| GET | `/health` | 健康檢查 (model_loaded, db_ready, providers) |
+| POST | `/api/predict` | X 光片推論 (multipart file upload) |
+| GET | `/api/model/info` | 模型資訊 |
+
+### 資料庫連線
+
+API 使用 SQLAlchemy 連接 PostgreSQL：
+
+```
+DATABASE_URL = postgresql://postgres:chestxpert123@postgres-svc:5432/chestxpert
 ```
 
 ### 本地啟動 API
 
 ```bash
-cd api
+cd api_build_onnx
 pip install -r requirements.txt
 
 # 啟動（開發模式）
-uvicorn src.main:app --reload --port 8000
+uvicorn main:app --reload --port 8000
 
 # 啟動（生產模式）
-uvicorn src.main:app --workers 4 --port 8000
+uvicorn main:app --workers 4 --port 8000
+```
+
+### 推論流程
+
+```
+上傳影像 (PNG/JPG)
+    ↓
+PIL 開啟 → resize 224x224 → normalize (ImageNet mean/std)
+    ↓
+轉換為 numpy array (1, 3, 224, 224), float32
+    ↓
+ONNX Runtime session.run({"image": array})
+    ↓
+Sigmoid → 15 個機率值
+    ↓
+排序 + 寫入 PostgreSQL
 ```
 
 ### 測試
 
 ```bash
-cd api
-pytest tests/ -v
+# 健康檢查
+curl https://ai-x-ray-detection.avision-gb10.org/health
+
+# 推論測試
+curl -X POST https://ai-x-ray-detection.avision-gb10.org/api/predict \
+  -F "file=@test_xray.png"
 ```
 
 ---
@@ -370,12 +404,12 @@ pytest tests/ -v
 ### GB10 上的 Minikube
 
 ```bash
-# 啟動 minikube
-minikube start --driver=docker --cpus=8 --memory=16g --disk-size=100g --cni=calico
+# 啟動 minikube (containerd driver)
+minikube start --driver=docker --container-runtime=containerd \
+  --cpus=8 --memory=16g --disk-size=100g
 
-# 啟用 addons
-minikube addons enable ingress
-minikube addons enable metrics-server
+# 啟用 nvidia-device-plugin (GPU, 目前有問題)
+minikube addons enable nvidia-device-plugin
 
 # 確認節點狀態
 kubectl get nodes
@@ -383,45 +417,62 @@ kubectl get nodes
 # minikube   Ready    control-plane   1h    v1.35.1
 ```
 
+### K8S Resources (namespace: ai-xray)
+
+| Resource | Type | 說明 |
+|----------|------|------|
+| ai-xray-api | Deployment | FastAPI + ONNX Runtime (CPU, 406MB) |
+| ai-xray-frontend | Deployment | nginx:alpine 前端 |
+| postgres | StatefulSet | PostgreSQL 15-alpine |
+| ai-xray-api-svc | ClusterIP :8000 | API service |
+| ai-xray-api-nodeport | NodePort :30800 | API NodePort |
+| postgres-svc | ClusterIP :5432 | PostgreSQL service |
+| frontend-html | ConfigMap | nginx 前端內容 |
+
 ### 部署步驟
 
 ```bash
 # 1. 建立 namespace
-kubectl apply -f k8s/namespace.yaml
+kubectl create namespace ai-xray
 
-# 2. 建立 Deployment + Service
-kubectl apply -f k8s/deployment.yaml
-kubectl apply -f k8s/service.yaml
+# 2. Build + Load images (host docker → minikube)
+docker build -t ai-xray-api:latest ./api_build_onnx/
+minikube image load ai-xray-api:latest
 
-# 3. 確認 Pod 狀態
+docker build -t ai-xray-frontend:latest ./frontend/
+minikube image load ai-xray-frontend:latest
+
+# 3. Deploy all
+kubectl apply -f k8s/
+
+# 4. 確認 Pod 狀態
 kubectl get pods -n ai-xray
-kubectl logs -f <pod-name> -n ai-xray
+kubectl logs -f deployment/ai-xray-api -n ai-xray
 
-# 4. Port forward（本地測試）
-kubectl port-forward svc/ai-xray-api 8000:8000 -n ai-xray
+# 5. 啟動 Cloudflare Tunnel
+cloudflared tunnel run dgx-spark
 ```
 
-### Docker Build
+### Docker Build 注意事項
+
+> ⚠️ minikube 使用 containerd，不能在 minikube docker env 裡 build。
+> 使用 host docker build，再用 `minikube image load` 匯入。
 
 ```bash
-# API 映像
-docker build -t ai-xray-api:latest ./api/
-
-# 推至 minikube registry
+# ✅ 正確做法
+docker build -t ai-xray-api:latest ./api_build_onnx/
 minikube image load ai-xray-api:latest
+
+# ❌ 錯誤：在 minikube containerd 裡 build
+eval $(minikube docker-env)
+docker build ...  # buildkit 404 error
 ```
 
-### K8S Manifests 說明
+### 外部存取
 
-- **namespace.yaml**: `ai-xray` namespace
-- **deployment.yaml**: Deployment + GPU 資源請求 + PVC 掛載
-- **service.yaml**: ClusterIP:8000
-
-### 部署目標
-
-- **網址**: `AI-X-ray-detection.avision-gb10.org`
+- **網址**: https://ai-x-ray-detection.avision-gb10.org
+- **路徑**: Cloudflare Tunnel → 192.168.49.2:30800 → nginx → API
 - **DNS**: Cloudflare 管理
-- **Ingress**: nginx (minikube addon)
 
 ---
 
@@ -509,24 +560,55 @@ pip install --pre torch torchvision torchaudio \
 
 #### 5. K8S Pod `ImagePullBackOff`
 
-minikube 使用本地 Docker，需要先 load 映像：
+minikube 使用本地映像，需要先 load：
 
 ```bash
+docker build -t ai-xray-api:latest ./api_build_onnx/
 minikube image load ai-xray-api:latest
 ```
 
-或設定 `imagePullPolicy: Never`。
+並在 K8S manifest 設定 `imagePullPolicy: Never` 或 `IfNotPresent`。
 
-#### 6. `qwen-asr` 佔用 GPU 記憶體
+#### 6. Docker build 在 minikube containerd 失敗
 
-GB10 上有其他服務使用 GPU。如需完整 GPU 記憶體：
+containerd 的 buildkit 會出現 404 錯誤。解法：
 
 ```bash
-# 查看佔用進程
-nvidia-smi
+# 在 host docker build，再 load 進 minikube
+docker build -t ai-xray-api:latest ./api_build_onnx/
+minikube image load ai-xray-api:latest
+```
 
-# 停止佔用進程（謹慎操作）
-kill <PID>
+#### 7. ONNX model 載入失敗
+
+ONNX 模型是 **兩個檔案**：`best_model.onnx` (graph) + `best_model.onnx.data` (weights)。
+Dockerfile 裡必須 COPY 兩個檔案：
+
+```dockerfile
+COPY models/best_model.onnx /app/models/
+COPY models/best_model.onnx.data /app/models/
+```
+
+#### 8. nvidia-device-plugin 無法註冊 GPU
+
+GB10 的 NVIDIA libs 在 `/usr/lib/aarch64-linux-gnu/`，但 device plugin 預期 `/usr/local/nvidia/`。
+目前使用 CPU 部署。GPU 替代方案：
+- 直接 mount `/dev/nvidia*` device + CUDA libs 到 pod
+- 設定 containerd 使用 nvidia-container-runtime
+- 使用 CDI (Container Device Interface)
+
+#### 9. Minikube 重啟後 API server port 改變
+
+`minikube stop && minikube start` 後 API server port 會變。
+NodePort (30800) 不受影響，Cloudflare Tunnel 使用 NodePort 所以外部存取不受影響。
+但 kubectl 可能需要更新 kubeconfig。
+
+#### 10. pexpect SSH 密碼被遮蔽
+
+pexpect 會將敏感字串替換為 `***`。用 `base64` 編碼輸出來繞過：
+
+```bash
+grep DATABASE_URL main.py | sed 's/.*:\/\/postgres://;s/@.*//' | base64
 ```
 
 ### 訓練監控
@@ -550,6 +632,23 @@ python train.py --eval_only --resume models/densenet121_nih/best_model.pth
 
 # 只匯出模型
 python train.py --export_only --resume models/densenet121_nih/best_model.pth
+```
+
+### K8S 除錯
+
+```bash
+# 查看 pod 狀態
+kubectl get pods -n ai-xray
+
+# 查看 pod 日誌
+kubectl logs -f deployment/ai-xray-api -n ai-xray
+
+# 進入 pod
+kubectl exec -it deployment/ai-xray-api -n ai-xray -- bash
+
+# API 健康檢查 (pod 內無 curl，用 python)
+kubectl exec -n ai-xray deployment/ai-xray-api -- \
+  python3 -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health').read().decode())"
 ```
 
 ---
