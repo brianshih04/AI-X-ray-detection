@@ -775,6 +775,54 @@ document.getElementById('btnRegenHeatmap').addEventListener('click', () => {
 });
 
 // === PDF Export ===
+// Helper: render CJK text as canvas image (bulletproof — no font embedding needed)
+function cjkTextImg(text, fontSize, color = '#000000', bold = false) {
+    const dpr = 3;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const weight = bold ? 'bold' : 'normal';
+    const fontStr = weight + ' ' + (fontSize * dpr) + 'px "PingFang TC","Microsoft JhengHei","Noto Sans TC",sans-serif';
+    ctx.font = fontStr;
+    const m = ctx.measureText(text);
+    canvas.width = Math.max(1, Math.ceil(m.width) + dpr * 2);
+    canvas.height = Math.max(1, Math.ceil(fontSize * dpr * 1.35));
+    ctx.font = fontStr;
+    ctx.fillStyle = color;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, dpr, canvas.height / 2);
+    return canvas.toDataURL('image/png');
+}
+
+// Helper: draw CJK text in PDF at (x, y) in mm, fontSize in pt
+function drawCJK(doc, text, x, y, fontSize, color, bold, align, pageW) {
+    const img = cjkTextImg(text, fontSize, color, bold);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const dpr = 3;
+    ctx.font = (bold ? 'bold ' : '') + (fontSize * dpr) + 'px sans-serif';
+    const tw = ctx.measureText(text).width / dpr; // approx width in points
+    const mmW = tw * 0.3528; // pt → mm
+    const mmH = fontSize * 0.45;
+    let drawX = x;
+    if (align === 'center') drawX = x - mmW / 2;
+    else if (align === 'right') drawX = x - mmW;
+    doc.addImage(img, 'PNG', drawX, y - mmH * 0.75, mmW, mmH);
+    return mmW;
+}
+
+// Helper: get image dimensions preserving aspect ratio
+function getImgDims(src, maxW, maxH) {
+    return new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => {
+            const ratio = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight);
+            resolve({ w: img.naturalWidth * ratio, h: img.naturalHeight * ratio });
+        };
+        img.onerror = () => resolve({ w: maxW, h: maxH });
+        img.src = src;
+    });
+}
+
 document.getElementById('btnPdf').addEventListener('click', async () => {
     if (!lastPredictData) return;
     const { jsPDF } = window.jspdf;
@@ -784,153 +832,105 @@ document.getElementById('btnPdf').addEventListener('click', async () => {
     const margin = 15;
     let y = margin;
 
-    // Load Noto Sans TC for Chinese support
-    try {
-        const url = 'https://cdn.jsdelivr.net/npm/noto-sans-tc@1.0.0/NotoSansTC-Regular.otf';
-        const fontResp = await fetch(url);
-        if (fontResp.ok) {
-            const fontBlob = await fontResp.arrayBuffer();
-            const fontArray = Array.from(new Uint8Array(fontBlob));
-            doc.addFile_Variable('NotoSansTC', fontArray);
-            doc.addFont('NotoSansTC', 'NotoSansTC', 'normal');
-        }
-    } catch (e) {
-        console.warn('CJK font load failed:', e.message);
-    }
-
-    // Helper: draw wrapped text and return new Y
-    function drawText(text, x, yy, maxW, lineH = 6) {
-        const lines = doc.splitTextToSize(text, maxW);
-        lines.forEach(line => {
-            if (yy > pageH - margin) { doc.addPage(); yy = margin; }
-            doc.text(line, x, yy);
-            yy += lineH;
-        });
-        return yy;
-    }
-
-    // ---- Header ----
+    // ---- Header banner ----
     doc.setFillColor(15, 23, 42);
     doc.rect(0, 0, pageW, 28, 'F');
-    doc.setFontSize(16);
-    doc.setTextColor(200, 220, 255);
-    doc.setFont('helvetica', 'bold');
-    doc.text('胸腔 X 光片 AI 判讀報告', pageW / 2, 12, { align: 'center' });
+    drawCJK(doc, '胸腔 X 光片 AI 判讀報告', pageW / 2, 8, 16, '#c8dcff', true, 'center');
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(148, 163, 184);
     doc.text('AI X-ray Detection System  |  DenseNet-121 (NIH ChestX-ray14)', pageW / 2, 19, { align: 'center' });
     const genTime = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
-    doc.text('產生時間：' + genTime, pageW / 2, 25, { align: 'center' });
+    drawCJK(doc, '產生時間：' + genTime, pageW / 2, 22.5, 8, '#94a3b8', false, 'center');
     y = 36;
 
-    // ---- Top Diagnosis ----
+    // ---- Top Diagnosis card ----
     const topLabel = lastPredictData.top_prediction;
     const topPct = (lastPredictData.top_confidence * 100).toFixed(1);
     const zhName = LABEL_ZH[topLabel] || topLabel;
 
     doc.setFillColor(30, 58, 95);
-    doc.roundedRect(margin, y, pageW - margin * 2, 22, 4, 4, 'F');
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(96, 165, 250);
-    doc.text('最可能診斷', pageW / 2, y + 7, { align: 'center' });
-    doc.setFontSize(20);
-    doc.setTextColor(241, 245, 249);
-    doc.setFont('helvetica', 'bold');
-    doc.text(zhName + ' (' + topLabel + ')', pageW / 2, y + 15, { align: 'center' });
+    doc.roundedRect(margin, y, pageW - margin * 2, 24, 4, 4, 'F');
+    drawCJK(doc, '最可能診斷', pageW / 2, y + 5, 10, '#60a5fa', false, 'center');
+    drawCJK(doc, zhName + ' (' + topLabel + ')', pageW / 2, y + 14, 18, '#f1f5f9', true, 'center');
     doc.setFontSize(28);
     doc.setTextColor(52, 211, 153);
-    doc.text(topPct + '%', pageW - margin - 5, y + 16, { align: 'right' });
+    doc.setFont('helvetica', 'bold');
+    doc.text(topPct + '%', pageW - margin - 5, y + 18, { align: 'right' });
     doc.setFont('helvetica', 'normal');
-    y += 30;
+    y += 32;
 
     // ---- Processing time ----
-    doc.setFontSize(8);
-    doc.setTextColor(100, 116, 139);
-    doc.text('處理時間：' + lastPredictData.processing_time_ms.toFixed(0) + ' ms', margin, y);
+    drawCJK(doc, '處理時間：' + lastPredictData.processing_time_ms.toFixed(0) + ' ms', margin, y, 8, '#64748b');
     y += 8;
 
-    // ---- Images section ----
+    // ---- Images section (original + heatmap side by side with correct aspect ratio) ----
     const origSrc = document.getElementById('dualOrigImg')?.src || document.getElementById('previewImage')?.src || '';
     const heatmapSrc = document.getElementById('dualHeatmapImg')?.src || '';
-
-    const imgHalfW = (pageW - margin * 2 - 8) / 2;
-    const imgH = imgHalfW * 0.75;
-    const hasOrig = origSrc?.startsWith('data:image');
-    const hasHeatmap = heatmapSrc?.startsWith('data:image/png;base64,');
+    const hasOrig = origSrc.startsWith('data:image');
+    const hasHeatmap = heatmapSrc.startsWith('data:image/png;base64,');
+    const imgMaxHalfW = (pageW - margin * 2 - 8) / 2;
+    const imgMaxH = 65;
 
     if (hasOrig || hasHeatmap) {
-        doc.setFontSize(11);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(30, 41, 59);
-        y = drawText('影像分析', margin, y, pageW - margin * 2) + 4;
+        drawCJK(doc, '影像分析', margin, y, 11, '#1e293b', true);
+        y += 8;
         const col1X = margin;
-        const col2X = margin + imgHalfW + 8;
-        const imgY = y;
+        const col2X = margin + imgMaxHalfW + 8;
+
         if (hasOrig) {
-            try {
-                doc.addImage(origSrc, 'JPEG', col1X, imgY, imgHalfW, imgH);
-                doc.setFontSize(8); doc.setFont('helvetica', 'normal');
-                doc.setTextColor(100, 116, 139);
-                doc.text('原始 X 光片', col1X + imgHalfW / 2, imgY + imgH + 4, { align: 'center' });
-            } catch (e) {}
+            const dims = await getImgDims(origSrc, imgMaxHalfW, imgMaxH);
+            const imgY = y + (imgMaxH - dims.h) / 2; // vertically center
+            doc.addImage(origSrc, 'JPEG', col1X, imgY, dims.w, dims.h);
+            drawCJK(doc, '原始 X 光片', col1X + imgMaxHalfW / 2, y + imgMaxH + 1, 8, '#64748b', false, 'center');
         }
         if (hasHeatmap) {
-            try {
-                doc.addImage(heatmapSrc, 'PNG', col2X, imgY, imgHalfW, imgH);
-                doc.setFontSize(8); doc.setFont('helvetica', 'normal');
-                doc.setTextColor(245, 158, 11);
-                doc.text('熱力圖疊加', col2X + imgHalfW / 2, imgY + imgH + 4, { align: 'center' });
-            } catch (e) {}
+            const dims = await getImgDims(heatmapSrc, imgMaxHalfW, imgMaxH);
+            const imgY = y + (imgMaxH - dims.h) / 2;
+            doc.addImage(heatmapSrc, 'PNG', col2X, imgY, dims.w, dims.h);
+            drawCJK(doc, '熱力圖疊加', col2X + imgMaxHalfW / 2, y + imgMaxH + 1, 8, '#f59e0b', false, 'center');
         }
-        y = imgY + imgH + 10;
+        y += imgMaxH + 10;
     }
 
-    // ---- All predictions table ----
-    if (y > pageH - 60) { doc.addPage(); y = margin; }
-    doc.setFontSize(11);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(30, 41, 59);
-    y = drawText('完整預測結果', margin, y, pageW - margin * 2) + 4;
+    // ---- All predictions ----
+    if (y > pageH - 70) { doc.addPage(); y = margin; }
+    drawCJK(doc, '完整預測結果', margin, y, 11, '#1e293b', true);
+    y += 8;
 
+    // Table header
     doc.setFillColor(241, 245, 249);
-    doc.rect(margin, y - 4, pageW - margin * 2, 8, 'F');
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(71, 85, 105);
-    doc.text('疾病名稱', margin + 2, y + 1);
-    doc.text('信心度', pageW - margin - 2, y + 1, { align: 'right' });
-    y += 6;
+    doc.rect(margin, y, pageW - margin * 2, 8, 'F');
+    drawCJK(doc, '疾病名稱', margin + 3, y + 4.5, 8, '#475569', true);
+    drawCJK(doc, '信心度', pageW - margin - 3, y + 4.5, 8, '#475569', true, 'right');
+    y += 10;
 
     lastPredictData.results.forEach(r => {
         const zh = LABEL_ZH[r.label] || r.label;
         const pct = (r.confidence * 100).toFixed(1);
-        if (y > pageH - 10) { doc.addPage(); y = margin; }
+        if (y > pageH - 12) { doc.addPage(); y = margin; }
+        // Bar background
         doc.setFillColor(241, 245, 249);
         doc.rect(margin, y, pageW - margin * 2, 7, 'F');
+        // Bar fill
         const barColor = r.confidence >= 0.7 ? [5, 150, 105] : r.confidence >= 0.4 ? [217, 119, 6] : [220, 38, 38];
         doc.setFillColor(...barColor);
         doc.rect(margin, y, (pageW - margin * 2) * r.confidence, 7, 'F');
+        // Disease name (CJK) and percentage (ASCII)
+        drawCJK(doc, zh, margin + 3, y + 4.5, 8, '#1e293b');
         doc.setFontSize(8);
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(30, 41, 59);
-        doc.text(zh, margin + 3, y + 5);
-        doc.text(pct + '%', pageW - margin - 3, y + 5, { align: 'right' });
+        doc.text(pct + '%', pageW - margin - 3, y + 4.5, { align: 'right' });
         y += 9;
     });
 
     // ---- Disclaimer ----
-    y = Math.max(y + 8, pageH - 20);
+    y = Math.max(y + 6, pageH - 18);
     doc.setFillColor(241, 245, 249);
-    doc.rect(margin, y, pageW - margin * 2, 14, 'F');
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(220, 38, 38);
-    doc.text('⚠ 免責聲明', margin + 2, y + 5);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100, 116, 139);
-    doc.text('本系統僅供學術研究與技術展示用途，不得作為臨床診斷依據。模型：DenseNet-121 (NIH ChestX-ray14) 平均 AUROC: 0.812', margin + 2, y + 10);
+    doc.rect(margin, y, pageW - margin * 2, 12, 'F');
+    drawCJK(doc, '⚠ 免責聲明', margin + 2, y + 3.5, 7, '#dc2626', true);
+    drawCJK(doc, '本系統僅供學術研究與技術展示用途，不得作為臨床診斷依據。', margin + 2, y + 8.5, 6.5, '#64748b');
 
     doc.save('xray-report-' + Date.now() + '.pdf');
 });
