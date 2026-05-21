@@ -29,6 +29,8 @@ models/checkpoints/
 *.pt
 *.pth
 *.onnx
+*.onnx.data
+api_build_onnx/models/
 
 # OS
 .DS_Store

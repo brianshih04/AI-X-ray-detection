@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>胸腔 X 光片自動判讀系統</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        header h1 {
+            font-size: 1.8rem;
+            background: linear-gradient(135deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.3rem;
+        }
+        header p { color: #94a3b8; font-size: 0.9rem; }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 2rem;
+            border-bottom: 2px solid #1e293b;
+        }
+        .tab {
+            padding: 0.8rem 1.5rem;
+            cursor: pointer;
+            color: #94a3b8;
+            font-size: 0.95rem;
+            font-weight: 500;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s;
+            user-select: none;
+        }
+        .tab:hover { color: #cbd5e1; }
+        .tab.active {
+            color: #60a5fa;
+            border-bottom-color: #60a5fa;
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* Upload zone */
+        .upload-zone {
+            border: 2px dashed #334155;
+            border-radius: 16px;
+            padding: 3rem 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #1e293b;
+            margin-bottom: 2rem;
+        }
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: #60a5fa;
+            background: #1e293b;
+            box-shadow: 0 0 30px rgba(96, 165, 250, 0.1);
+        }
+        .upload-zone .icon { font-size: 3rem; margin-bottom: 1rem; }
+        .upload-zone h3 { color: #cbd5e1; margin-bottom: 0.5rem; }
+        .upload-zone span { color: #64748b; font-size: 0.85rem; }
+        #fileInput { display: none; }
+        .preview-container {
+            display: none;
+            margin-bottom: 2rem;
+            background: #1e293b;
+            border-radius: 16px;
+            padding: 1.5rem;
+        }
+        .preview-container.show { display: block; }
+        .preview-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .preview-header h3 { color: #94a3b8; font-size: 0.9rem; }
+        .btn-remove {
+            background: none;
+            border: 1px solid #475569;
+            color: #94a3b8;
+            padding: 0.3rem 0.8rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+        .btn-remove:hover { border-color: #f87171; color: #f87171; }
+        .preview-image {
+            width: 100%;
+            max-height: 400px;
+            object-fit: contain;
+            border-radius: 8px;
+            background: #0f172a;
+        }
+        .btn-predict {
+            display: none;
+            width: 100%;
+            padding: 1rem;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 2rem;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            color: white;
+            transition: all 0.3s;
+        }
+        .btn-predict:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(59, 130, 246, 0.3); }
+        .btn-predict:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
+        .btn-predict.show { display: block; }
+        .spinner {
+            display: inline-block;
+            width: 20px; height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .results { display: none; }
+        .results.show { display: block; }
+        .top-result {
+            background: linear-gradient(135deg, #1e3a5f, #1e293b);
+            border: 1px solid #334155;
+            border-radius: 16px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            text-align: center;
+        }
+        .top-result .label {
+            font-size: 0.85rem;
+            color: #60a5fa;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 0.5rem;
+        }
+        .top-result .disease { font-size: 1.8rem; font-weight: 700; color: #f1f5f9; }
+        .top-result .confidence { font-size: 2.5rem; font-weight: 800; }
+        .top-result .confidence.high { color: #34d399; }
+        .top-result .confidence.medium { color: #fbbf24; }
+        .top-result .confidence.low { color: #f87171; }
+        .time-info { color: #64748b; font-size: 0.8rem; margin-top: 0.5rem; }
+        .bar-list { list-style: none; }
+        .bar-item {
+            display: flex;
+            align-items: center;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid #1e293b;
+        }
+        .bar-item:last-child { border-bottom: none; }
+        .bar-label {
+            width: 150px;
+            font-size: 0.85rem;
+            color: #cbd5e1;
+            flex-shrink: 0;
+        }
+        .bar-track {
+            flex: 1;
+            height: 24px;
+            background: #1e293b;
+            border-radius: 12px;
+            overflow: hidden;
+            margin: 0 0.8rem;
+        }
+        .bar-fill {
+            height: 100%;
+            border-radius: 12px;
+            transition: width 0.8s ease;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 8px;
+            min-width: 0;
+        }
+        .bar-fill .bar-pct {
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: white;
+            white-space: nowrap;
+        }
+        .bar-value {
+            width: 55px;
+            text-align: right;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #94a3b8;
+            flex-shrink: 0;
+        }
+        .legend {
+            margin-top: 2rem;
+            padding: 1rem;
+            background: #1e293b;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            color: #64748b;
+            line-height: 1.6;
+        }
+
+        /* History */
+        .history-list { list-style: none; }
+        .history-item {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 1rem 1.2rem;
+            margin-bottom: 0.8rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            transition: transform 0.2s;
+            cursor: default;
+        }
+        .history-item:hover { transform: translateX(4px); }
+        .history-icon {
+            font-size: 1.6rem;
+            width: 40px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        .history-info { flex: 1; min-width: 0; }
+        .history-disease {
+            font-weight: 600;
+            color: #f1f5f9;
+            font-size: 0.95rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .history-meta {
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-top: 0.2rem;
+        }
+        .history-confidence {
+            font-weight: 700;
+            font-size: 1.1rem;
+            flex-shrink: 0;
+        }
+        .history-confidence.high { color: #34d399; }
+        .history-confidence.medium { color: #fbbf24; }
+        .history-confidence.low { color: #f87171; }
+        .history-empty {
+            text-align: center;
+            padding: 3rem;
+            color: #475569;
+        }
+        .history-empty .icon { font-size: 3rem; margin-bottom: 1rem; }
+        .history-loading {
+            text-align: center;
+            padding: 2rem;
+            color: #64748b;
+        }
+        .history-stats {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .stat-card {
+            flex: 1;
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 1rem;
+            text-align: center;
+        }
+        .stat-card .stat-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #60a5fa;
+        }
+        .stat-card .stat-label {
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-top: 0.2rem;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 3rem;
+            padding: 1rem;
+            color: #475569;
+            font-size: 0.8rem;
+        }
+        @media (max-width: 600px) {
+            .bar-label { width: 110px; font-size: 0.75rem; }
+            header h1 { font-size: 1.4rem; }
+            .history-stats { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>🫁 胸腔 X 光片自動判讀系統</h1>
+        <p>AI X-ray Detection — 上傳胸腔 X 光片，自動辨識 14 種胸腔疾病</p>
+    </header>
+
+    <div class="tabs">
+        <div class="tab active" data-tab="analyze">🔍 判讀分析</div>
+        <div class="tab" data-tab="history">📋 歷史記錄</div>
+    </div>
+
+    <!-- Tab 1: Analyze -->
+    <div class="tab-content active" id="tab-analyze">
+        <div class="upload-zone" id="uploadZone">
+            <div class="icon">📤</div>
+            <h3>拖曳 X 光片至此處，或點選上傳</h3>
+            <span>支援 PNG、JPG、JPEG 格式</span>
+            <input type="file" id="fileInput" accept="image/png,image/jpeg,image/jpg">
+        </div>
+
+        <div class="preview-container" id="previewContainer">
+            <div class="preview-header">
+                <h3>📎 預覽</h3>
+                <button class="btn-remove" id="btnRemove">✕ 移除</button>
+            </div>
+            <img class="preview-image" id="previewImage" alt="X-ray preview">
+        </div>
+
+        <button class="btn-predict" id="btnPredict">開始判讀</button>
+
+        <div class="results" id="results">
+            <div class="top-result" id="topResult"></div>
+            <ul class="bar-list" id="barList"></ul>
+            <div class="legend">
+                ⚠️ 本系統僅供學術研究與技術展示用途，不得作為臨床診斷依據。<br>
+                模型：DenseNet-121 (NIH ChestX-ray14) | Mean AUROC: 0.812
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab 2: History -->
+    <div class="tab-content" id="tab-history">
+        <div class="history-stats" id="historyStats">
+            <div class="stat-card">
+                <div class="stat-value" id="statTotal">—</div>
+                <div class="stat-label">總判讀次數</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statAvgTime">—</div>
+                <div class="stat-label">平均處理時間</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statTopDisease">—</div>
+                <div class="stat-label">最常見診斷</div>
+            </div>
+        </div>
+        <ul class="history-list" id="historyList">
+            <li class="history-loading">載入中...</li>
+        </ul>
+    </div>
+
+    <footer>
+        AI X-ray Detection System © 2026 — 大三專題
+    </footer>
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+
+const LABEL_ZH = {
+    'Atelectasis': '肺不張', 'Cardiomegaly': '心臟肥大', 'Consolidation': '肺實變',
+    'Edema': '肺水腫', 'Effusion': '胸腔積液', 'Emphysema': '肺氣腫',
+    'Fibrosis': '肺纖維化', 'Hernia': '橫膈膜疝氣', 'Infiltration': '肺浸潤',
+    'Mass': '腫塊', 'Nodule': '肺結節', 'Pleural_Thickening': '肋膜增厚',
+    'Pneumonia': '肺炎', 'Pneumothorax': '氣胸', 'No_Finding': '無異常'
+};
+
+const DISEASE_ICONS = {
+    'Cardiomegaly': '❤️', 'Pneumonia': '🦠', 'Pneumothorax': '💨',
+    'Effusion': '💧', 'Atelectasis': '🫁', 'No_Finding': '✅',
+    'default': '🔬'
+};
+
+function getBarColor(pct) {
+    if (pct >= 0.7) return 'linear-gradient(90deg, #059669, #34d399)';
+    if (pct >= 0.4) return 'linear-gradient(90deg, #d97706, #fbbf24)';
+    return 'linear-gradient(90deg, #dc2626, #f87171)';
+}
+
+function getConfidenceClass(pct) {
+    if (pct >= 0.7) return 'high';
+    if (pct >= 0.4) return 'medium';
+    return 'low';
+}
+
+function getDiseaseIcon(label) {
+    return DISEASE_ICONS[label] || DISEASE_ICONS['default'];
+}
+
+function formatTime(isoStr) {
+    if (!isoStr) return '—';
+    const d = new Date(isoStr);
+    const now = new Date();
+    const diff = now - d;
+    if (diff < 60000) return '剛剛';
+    if (diff < 3600000) return Math.floor(diff/60000) + ' 分鐘前';
+    if (diff < 86400000) return Math.floor(diff/3600000) + ' 小時前';
+    return d.toLocaleDateString('zh-TW', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+}
+
+// === Tabs ===
+document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        const target = tab.dataset.tab;
+        document.getElementById('tab-' + target).classList.add('active');
+        if (target === 'history') loadHistory();
+    });
+});
+
+// === Upload ===
+const uploadZone = document.getElementById('uploadZone');
+const fileInput = document.getElementById('fileInput');
+const previewContainer = document.getElementById('previewContainer');
+const previewImage = document.getElementById('previewImage');
+const btnRemove = document.getElementById('btnRemove');
+const btnPredict = document.getElementById('btnPredict');
+const resultsDiv = document.getElementById('results');
+
+let selectedFile = null;
+
+uploadZone.addEventListener('click', () => fileInput.click());
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+uploadZone.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => { if (e.target.files.length) handleFile(e.target.files[0]); });
+
+function handleFile(file) {
+    if (!file.type.match('image.*')) { alert('請上傳圖片檔案（PNG/JPG）'); return; }
+    selectedFile = file;
+    const reader = new FileReader();
+    reader.onload = e => {
+        previewImage.src = e.target.result;
+        previewContainer.classList.add('show');
+        btnPredict.classList.add('show');
+        uploadZone.style.display = 'none';
+        resultsDiv.classList.remove('show');
+    };
+    reader.readAsDataURL(file);
+}
+
+btnRemove.addEventListener('click', () => {
+    selectedFile = null;
+    fileInput.value = '';
+    previewContainer.classList.remove('show');
+    btnPredict.classList.remove('show');
+    uploadZone.style.display = '';
+    resultsDiv.classList.remove('show');
+});
+
+btnPredict.addEventListener('click', async () => {
+    if (!selectedFile) return;
+    btnPredict.disabled = true;
+    btnPredict.innerHTML = '<span class="spinner"></span>判讀中...';
+    resultsDiv.classList.remove('show');
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+
+    try {
+        const res = await fetch(API_BASE + '/api/predict', { method: 'POST', body: formData });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        renderResults(data);
+    } catch (err) {
+        alert('判讀失敗：' + err.message);
+    } finally {
+        btnPredict.disabled = false;
+        btnPredict.textContent = '重新判讀';
+    }
+});
+
+function renderResults(data) {
+    const topDiv = document.getElementById('topResult');
+    const topLabel = data.top_prediction;
+    const topPct = (data.top_confidence * 100).toFixed(1);
+    const zhName = LABEL_ZH[topLabel] || topLabel;
+    const confClass = getConfidenceClass(data.top_confidence);
+    topDiv.innerHTML = `
+        <div class="label">最可能診斷</div>
+        <div class="disease">${zhName} (${topLabel})</div>
+        <div class="confidence ${confClass}">${topPct}%</div>
+        <div class="time-info">處理時間：${data.processing_time_ms.toFixed(0)} ms</div>
+    `;
+
+    const barList = document.getElementById('barList');
+    barList.innerHTML = '';
+    data.results.forEach((r, i) => {
+        const pct = r.confidence;
+        const zh = LABEL_ZH[r.label] || r.label;
+        const li = document.createElement('li');
+        li.className = 'bar-item';
+        li.innerHTML = `
+            <span class="bar-label">${zh}<br><small style="color:#64748b">${r.label}</small></span>
+            <div class="bar-track">
+                <div class="bar-fill" style="width:0%;background:${getBarColor(pct)}">
+                    <span class="bar-pct">${(pct * 100).toFixed(1)}%</span>
+                </div>
+            </div>
+            <span class="bar-value">${(pct * 100).toFixed(1)}%</span>
+        `;
+        barList.appendChild(li);
+        setTimeout(() => {
+            li.querySelector('.bar-fill').style.width = Math.max(pct * 100, 8) + '%';
+        }, 50 + i * 50);
+    });
+
+    resultsDiv.classList.add('show');
+    resultsDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// === History ===
+async function loadHistory() {
+    const list = document.getElementById('historyList');
+    list.innerHTML = '<li class="history-loading">載入中...</li>';
+
+    try {
+        const res = await fetch(API_BASE + '/api/predictions?limit=50');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        renderHistory(data);
+    } catch (err) {
+        list.innerHTML = `<li class="history-empty"><div class="icon">⚠️</div>無法載入歷史記錄<br><small>${err.message}</small></li>`;
+    }
+}
+
+function renderHistory(data) {
+    const list = document.getElementById('historyList');
+
+    // Stats
+    const total = data.length;
+    const avgTime = total > 0 ? (data.reduce((s, r) => s + (r.processing_time_ms || 0), 0) / total).toFixed(0) : 0;
+    const diseaseCounts = {};
+    data.forEach(r => { if (r.top_prediction) diseaseCounts[r.top_prediction] = (diseaseCounts[r.top_prediction] || 0) + 1; });
+    const topDisease = Object.keys(diseaseCounts).sort((a, b) => diseaseCounts[b] - diseaseCounts[a])[0] || '—';
+
+    document.getElementById('statTotal').textContent = total;
+    document.getElementById('statAvgTime').textContent = avgTime + 'ms';
+    document.getElementById('statTopDisease').textContent = LABEL_ZH[topDisease] || topDisease;
+
+    if (total === 0) {
+        list.innerHTML = '<li class="history-empty"><div class="icon">📭</div>尚無判讀記錄<br><small>上傳 X 光片開始使用</small></li>';
+        return;
+    }
+
+    list.innerHTML = '';
+    data.forEach(r => {
+        const zh = LABEL_ZH[r.top_prediction] || r.top_prediction || '未知';
+        const confClass = getConfidenceClass(r.top_confidence);
+        const pct = r.top_confidence != null ? (r.top_confidence * 100).toFixed(1) : '—';
+        const icon = getDiseaseIcon(r.top_prediction);
+        const li = document.createElement('li');
+        li.className = 'history-item';
+        li.innerHTML = `
+            <div class="history-icon">${icon}</div>
+            <div class="history-info">
+                <div class="history-disease">${zh}</div>
+                <div class="history-meta">${r.filename || '未命名'} · ${r.processing_time_ms ? r.processing_time_ms.toFixed(0) + 'ms' : ''} · ${formatTime(r.created_at)}</div>
+            </div>
+            <div class="history-confidence ${confClass}">${pct}%</div>
+        `;
+        list.appendChild(li);
+    });
+}
+</script>
+</body>
+</html>

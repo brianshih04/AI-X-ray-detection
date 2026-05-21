@@ -12,3 +12,19 @@ spec:
     targetPort: 8000
     protocol: TCP
     name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-xray-api-nodeport
+  namespace: ai-xray
+spec:
+  type: NodePort
+  selector:
+    app: ai-xray-api
+  ports:
+  - port: 8000
+    targetPort: 8000
+    nodePort: 30800
+    protocol: TCP
+    name: http
