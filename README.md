@@ -81,8 +81,9 @@ ai-xray-detection/
 
 | 來源 | 連結 | 說明 |
 |------|------|------|
-| NIH 官方 (Box) | https://nihcc.app.box.com/s/vfk49d74nhbxq3nqjxj9 | 原始出處，需手動下載 12 個分卷 |
-| Kaggle | https://www.kaggle.com/datasets/nih-chest-xrays/data | Kaggle 鏡像，`kaggle datasets download nih-chest-xrays/data` |
+| Kaggle | https://www.kaggle.com/datasets/nih-chest-xrays/data | `kaggle datasets download nih-chest-xrays/data`（最方便） |
+| HuggingFace | https://huggingface.co/datasets/BahaaEldin0/NIH-Chest-Xray-14 | Parquet 格式，`datasets` 庫可直接載入 |
+| NIH 官方 | https://nihcc.app.box.com/s/vfk49d74nhbxq3nqjxj9 | 原始出處（Box 空間可能已失效，建議用上方鏡像） |
 
 **下載後的目錄結構：**
 
