@@ -26,11 +26,14 @@ data/processed/
 *.tar.gz
 *.zip
 models/checkpoints/
+# Models (keep onnx in api_build_onnx for deployment)
 *.pt
 *.pth
+# Exclude onnx everywhere except api_build_onnx/models/
 *.onnx
 *.onnx.data
-api_build_onnx/models/
+!api_build_onnx/models/*.onnx
+!api_build_onnx/models/*.onnx.data
 
 # OS
 .DS_Store

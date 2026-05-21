@@ -1,0 +1,5 @@
+# ONNX model files not tracked in git — see .gitattributes
+# Build: docker build -t ai-xray-api:latest .
+# The following files must be present for build:
+#   models/best_model.onnx       (1.1MB - ONNX graph)
+#   models/best_model.onnx.data  (27MB - ONNX weights)

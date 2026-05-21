@@ -71,6 +71,53 @@ ai-xray-detection/
 └── TODO.md
 ```
 
+## 資料集
+
+### NIH ChestX-ray14
+
+本專案使用 **NIH ChestX-ray14** 資料集進行訓練，包含 112,120 張正面胸腔 X 光片，涵蓋 14 種疾病標籤。
+
+**下載位置（擇一）：**
+
+| 來源 | 連結 | 說明 |
+|------|------|------|
+| NIH 官方 (Box) | https://nihcc.app.box.com/s/vfk49d74nhbxq3nqjxj9 | 原始出處，需手動下載 12 個分卷 |
+| Kaggle | https://www.kaggle.com/datasets/nih-chest-xrays/data | Kaggle 鏡像，`kaggle datasets download nih-chest-xrays/data` |
+
+**下載後的目錄結構：**
+
+```
+data/
+├── Data_Entry_2017.csv          # 標籤 metadata (從 Box 下載)
+├── images_001/.../images/       # 影像分卷 (images_001 ~ images_012)
+│   ├── 00000001_000.png
+│   ├── 00000001_001.png
+│   └── ...
+├── train_list.txt               # 官方 train/val/test split
+├── val_list.txt
+└── test_list.txt
+```
+
+**前置處理（生成 train.csv / val.csv）：**
+
+```bash
+cd model_training
+pip install -r requirements.txt
+python preprocess_nih.py --data_dir /path/to/data --output_dir /path/to/data
+```
+
+### 預訓練 ONNX 模型
+
+不想重新訓練的話，可直接使用 repo 中的 ONNX 模型進行推論：
+
+```
+api_build_onnx/models/
+├── best_model.onnx       (1.1 MB — ONNX graph)
+└── best_model.onnx.data  (27 MB  — ONNX weights)
+```
+
+> 模型已包含在 repo 中，clone 後即可直接 build Docker image。
+
 ## 快速開始
 
 ### 前端 (Nginx)
