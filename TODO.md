@@ -19,6 +19,11 @@
 - [x] 100 張測試影像 + NIH ChestX-ray14 下載指南
 - [x] ONNX Runtime GPU wheel 建置 (aarch64 + sm_121, 54MB)
 - [x] GPU Docker image 建置 (598MB)
+- [x] CAM 熱力圖視覺化 (Class Activation Mapping)
+  - API: POST /api/gradcam (base64 heatmap + 預測結果)
+  - 前端: 🔥 按鈕 → 並排原圖/疊加圖，疾病下拉選單
+  - CAM model: best_model_cam.onnx (relu_120 中間層, 1024×7×7)
+  - ~345ms (含 heatmap 生成)
 - [x] 文件更新 (README, CHANGELOG, DEVELOPMENT, TODO)
 
 ## 暫緩 ⏸️
@@ -37,7 +42,6 @@
   - 支援批次上傳 (多張 X 光片)
   - 結果匯出 (PDF 報告)
 - [ ] 模型改善
-  - Grad-CAM 熱力圖 (視覺化模型關注區域)
   - 多模型比較 (ResNet, EfficientNet)
   - Ensemble 推論
 - [ ] API 完整版

@@ -7,6 +7,29 @@
 
 ---
 
+## [0.4.0] - 2026-05-21
+
+### Added
+- **CAM 熱力圖視覺化**: 上傳 X 光片後可查看模型關注區域
+  - API: `POST /api/gradcam` — 回傳 base64 heatmap + 預測結果
+  - 前端: 🔥 熱力圖按鈕 → 並排顯示原圖/疊加圖，可下拉切換 14 種疾病
+  - 方法: CAM (Class Activation Mapping) — 最後卷積層 `relu_120` 特徵圖 × classifier 權重
+  - ONNX CAM model: `best_model_cam.onnx` (含 relu_120 中間層輸出, 1024 channels, 7×7)
+  - 推論速度: ~345ms (含 heatmap 生成)
+- **前端 UI 更新**: 疾病選擇下拉選單、熱力圖疊加顯示、深色主題一致
+
+### Changed
+- `api_build_onnx/requirements.txt` 新增 `onnx>=1.16.0`, `opencv-python-headless>=4.8.0`
+- `api_build_onnx/Dockerfile` 新增 `libgl1 libglib2.0-0` (OpenCV deps)
+- 前端 nginx root 改為 `/tmp` (workaround for read-only FS in minikube containerd)
+
+### Fixed
+- ONNX model data 損壞問題 — `best_model.onnx.data` MD5 不符導致 ORT 1.26.0 載入失敗
+- minikube containerd image cache — 需 `crictl rmi` + 新 tag 才能更新映像
+- Cloudflared tunnel 重啟後恢復正常路由
+
+---
+
 ## [0.3.0] - 2026-05-21
 
 ### Changed

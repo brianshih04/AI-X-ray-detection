@@ -8,12 +8,13 @@
 瀏覽器 → https://ai-x-ray-detection.avision-gb10.org
                     │
                     ▼
-          ┌─ Nginx Frontend (NodePort 30800)
+          ┌─ Nginx Frontend (NodePort 30080)
           │   ├─ /          → 靜態網頁 (上傳 + 結果顯示)
           │   └─ /api/*     → reverse proxy → API Service
           │
           ├─ FastAPI Backend (ai-xray-api-svc:8000)
           │   ├─ POST /api/predict   → X 光片推論
+          │   ├─ POST /api/gradcam   → 熱力圖視覺化
           │   ├─ GET  /api/model/info → 模型資訊
           │   └─ GET  /health         → 健康檢查
           │
@@ -39,6 +40,7 @@ curl -X POST https://ai-x-ray-detection.avision-gb10.org/api/predict \
 
 - **架構**: DenseNet-121 ( pretrained ImageNet → fine-tuned )
 - **推論引擎**: ONNX Runtime (CPUExecutionProvider)
+- **熱力圖**: CAM (Class Activation Mapping) — 最後卷積層 relu_120 (1024 channels) × classifier 權重
 - **資料集**: NIH ChestX-ray14 ( 112,120 張正面胸腔 X 光片 )
 - **標籤數**: 15 ( 14 種疾病 + No Finding )
 - **輸入**: 224×224 RGB
@@ -63,8 +65,8 @@ ai-xray-detection/
 │   ├── nginx.conf
 │   └── Dockerfile
 ├── api_build_onnx/        # API (FastAPI + ONNX Runtime) ← 使用中
-│   ├── main.py            # FastAPI 推論服務
-│   ├── models/            # ONNX 模型 (best_model.onnx + .data)
+│   ├── main.py            # FastAPI 推論服務 + CAM 熱力圖
+│   ├── models/            # ONNX 模型 (best_model.onnx + .data + best_model_cam.onnx + .data)
 │   ├── requirements.txt
 │   ├── Dockerfile         # CPU 版 (406MB)
 │   └── Dockerfile.gpu     # GPU 版 (598MB, 未部署)
@@ -126,7 +128,9 @@ python preprocess_nih.py --data_dir /path/to/data --output_dir /path/to/data
 ```
 api_build_onnx/models/
 ├── best_model.onnx       (1.1 MB — ONNX graph)
-└── best_model.onnx.data  (27 MB  — ONNX weights)
+├── best_model.onnx.data  (27 MB  — ONNX weights)
+├── best_model_cam.onnx   (1.2 MB — CAM model graph, 含 relu_120 中間層輸出)
+└── best_model_cam.onnx.data (27 MB — CAM model weights)
 ```
 
 > 模型已包含在 repo 中，clone 後即可直接 build Docker image。
@@ -164,6 +168,12 @@ curl https://ai-x-ray-detection.avision-gb10.org/health
 curl -X POST https://ai-x-ray-detection.avision-gb10.org/api/predict \
   -F "file=@chest_xray.png"
 # → {"results":[...],"top_prediction":"Cardiomegaly","top_confidence":0.9996,"processing_time_ms":90.29}
+
+# 熱力圖 (CAM)
+curl -X POST https://ai-x-ray-detection.avision-gb10.org/api/gradcam \
+  -F "file=@chest_xray.png" \
+  -F "label=Cardiomegaly"
+# → {"heatmap":"<base64 PNG>","label":"Cardiomegaly","confidence":0.9996,...}
 ```
 
 ## 環境
