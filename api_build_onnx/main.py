@@ -7,11 +7,16 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
+import base64
 import numpy as np
+import onnx
 import onnxruntime as ort
+from onnx import numpy_helper
 from PIL import Image
+import cv2
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine, Column, String, Float, DateTime, Integer, JSON, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -61,15 +66,31 @@ def init_db():
         db_ready = False
 
 session = None
+cam_session = None
+cam_weights = None
 
 def load_model():
-    global session
+    global session, cam_session, cam_weights
     providers = ["CPUExecutionProvider"]
     sess_opts = ort.SessionOptions()
     sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     model_path = "/app/models/best_model.onnx"
     session = ort.InferenceSession(model_path, sess_opts=sess_opts, providers=providers)
     logger.info(f"ONNX model loaded. Providers: {session.get_providers()}")
+
+    # Load CAM model (same model with intermediate output added)
+    cam_model_path = "/app/models/best_model_cam.onnx"
+    cam_sess_opts = ort.SessionOptions()
+    cam_sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+    cam_session = ort.InferenceSession(cam_model_path, sess_opts=cam_sess_opts, providers=providers)
+    # Extract classification weights for CAM computation
+    onnx_model = onnx.load(cam_model_path)
+    gemm_node = [n for n in onnx_model.graph.node if n.op_type == "Gemm"][0]
+    for init in onnx_model.graph.initializer:
+        if init.name == gemm_node.input[1]:
+            cam_weights = numpy_helper.to_array(init)  # [15, 1024]
+            break
+    logger.info(f"CAM model loaded. Weights shape: {cam_weights.shape}")
 
 def preprocess(file_bytes):
     img = Image.open(io.BytesIO(file_bytes))
@@ -158,3 +179,57 @@ async def list_predictions(limit: int = 20):
     finally:
         if s:
             s.close()
+
+def generate_cam(inp, label_idx):
+    """Generate CAM heatmap for a specific label."""
+    results = cam_session.run(None, {"image": inp})
+    feature_maps = results[1]  # [1, 1024, 7, 7]
+    cam = np.zeros(feature_maps.shape[2:], dtype=np.float32)
+    for i in range(feature_maps.shape[1]):
+        cam += cam_weights[label_idx, i] * feature_maps[0, i, :, :]
+    cam = np.maximum(cam, 0)
+    if cam.max() > 0:
+        cam = (cam - cam.min()) / (cam.max() - cam.min())
+    return cam
+
+@app.post("/api/gradcam")
+async def gradcam(file: UploadFile = File(...), label: str = None):
+    """Generate Grad-CAM heatmap overlay for an X-ray image."""
+    if cam_session is None or cam_weights is None:
+        raise HTTPException(503, "CAM model not loaded")
+    if file.content_type and file.content_type not in ("image/png", "image/jpeg", "image/jpg"):
+        raise HTTPException(400, "Use PNG or JPEG")
+    file_bytes = await file.read()
+    if len(file_bytes) > 50 * 1024 * 1024:
+        raise HTTPException(413, "Image too large")
+    try:
+        inp = preprocess(file_bytes)
+    except Exception as e:
+        raise HTTPException(422, f"Failed to process image: {e}")
+
+    start = time.perf_counter()
+    logits = session.run(None, {"image": inp})[0][0]
+    probs = 1.0 / (1.0 + np.exp(-logits))
+    results = [{"label": l, "confidence": round(float(p), 4)} for l, p in zip(LABELS, probs)]
+    results.sort(key=lambda x: x["confidence"], reverse=True)
+
+    # Use specified label or top prediction
+    target_label = label if label and label in LABELS else results[0]["label"]
+    label_idx = LABELS.index(target_label)
+
+    cam = generate_cam(inp, label_idx)
+    cam_resized = np.array(Image.fromarray(cam).resize((224, 224), Image.BILINEAR))
+    heatmap = cv2.applyColorMap(np.uint8(255 * cam_resized), cv2.COLORMAP_JET)
+    heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
+    orig = np.array(Image.open(io.BytesIO(file_bytes)).convert("RGB").resize((224, 224)))
+    overlay = np.float32(heatmap) * 0.4 + np.float32(orig) * 0.6
+    overlay = np.clip(overlay, 0, 255).astype(np.uint8)
+
+    # Encode to base64
+    buf = io.BytesIO()
+    Image.fromarray(overlay).save(buf, format="PNG")
+    heatmap_b64 = base64.b64encode(buf.getvalue()).decode()
+
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    return {"results": results, "target_label": target_label,
+            "heatmap": heatmap_b64, "processing_time_ms": round(elapsed_ms, 2)}

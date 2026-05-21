@@ -214,6 +214,71 @@
             color: #64748b;
             line-height: 1.6;
         }
+        .btn-heatmap {
+            display: none;
+            width: 100%;
+            padding: 0.9rem;
+            border: 2px solid #f59e0b;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 1.5rem;
+            margin-bottom: 1rem;
+            background: transparent;
+            color: #f59e0b;
+            transition: all 0.3s;
+        }
+        .btn-heatmap:hover { background: rgba(245,158,11,0.1); }
+        .btn-heatmap:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-heatmap.show { display: block; }
+        .heatmap-section {
+            display: none;
+            margin-top: 1.5rem;
+            background: #1e293b;
+            border-radius: 16px;
+            padding: 1.5rem;
+        }
+        .heatmap-section.show { display: block; }
+        .heatmap-section h3 { color: #f59e0b; margin-bottom: 0.5rem; font-size: 1rem; }
+        .heatmap-section p { color: #64748b; font-size: 0.8rem; margin-bottom: 1rem; }
+        .heatmap-images {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        .heatmap-images .img-box {
+            text-align: center;
+        }
+        .heatmap-images .img-box img {
+            width: 100%;
+            border-radius: 8px;
+            background: #0f172a;
+        }
+        .heatmap-images .img-box .caption {
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-top: 0.5rem;
+        }
+        .heatmap-label-select {
+            margin-top: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            flex-wrap: wrap;
+        }
+        .heatmap-label-select label { color: #94a3b8; font-size: 0.85rem; }
+        .heatmap-label-select select {
+            background: #0f172a;
+            color: #e2e8f0;
+            border: 1px solid #334155;
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+        }
+        @media (max-width: 600px) {
+            .heatmap-images { grid-template-columns: 1fr; }
+        }
 
         /* History */
         .history-list { list-style: none; }
@@ -342,6 +407,26 @@
             <div class="legend">
                 ⚠️ 本系統僅供學術研究與技術展示用途，不得作為臨床診斷依據。<br>
                 模型：DenseNet-121 (NIH ChestX-ray14) | Mean AUROC: 0.812
+            </div>
+            <button class="btn-heatmap" id="btnHeatmap">🔥 查看熱力圖（模型關注區域）</button>
+            <div class="heatmap-section" id="heatmapSection">
+                <h3>🔥 Grad-CAM 熱力圖</h3>
+                <p>紅色區域為模型判斷病灶時重點關注的區域，藍色為低關注區域。</p>
+                <div class="heatmap-images">
+                    <div class="img-box">
+                        <img id="heatmapOrig" alt="Original X-ray">
+                        <div class="caption">原始 X 光片</div>
+                    </div>
+                    <div class="img-box">
+                        <img id="heatmapOverlay" alt="Grad-CAM overlay">
+                        <div class="caption" id="heatmapCaption">熱力圖疊加</div>
+                    </div>
+                </div>
+                <div class="heatmap-label-select">
+                    <label>選擇疾病：</label>
+                    <select id="heatmapLabelSelect"></select>
+                    <button class="btn-heatmap" id="btnRegenHeatmap" style="display:inline-block;width:auto;padding:0.5rem 1rem;margin:0;font-size:0.85rem;">重新生成</button>
+                </div>
             </div>
         </div>
     </div>
@@ -531,7 +616,72 @@ function renderResults(data) {
 
     resultsDiv.classList.add('show');
     resultsDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    // Show heatmap button & populate label selector
+    document.getElementById('btnHeatmap').classList.add('show');
+    document.getElementById('heatmapSection').classList.remove('show');
+    const sel = document.getElementById('heatmapLabelSelect');
+    sel.innerHTML = '';
+    data.results.forEach(r => {
+        const zh = LABEL_ZH[r.label] || r.label;
+        const opt = document.createElement('option');
+        opt.value = r.label;
+        opt.textContent = `${zh} (${(r.confidence * 100).toFixed(1)}%)`;
+        sel.appendChild(opt);
+    });
 }
+
+// === Heatmap ===
+let lastPredictData = null;
+
+const _origRender = renderResults;
+renderResults = function(data) {
+    lastPredictData = data;
+    _origRender(data);
+};
+
+async function fetchHeatmap(label) {
+    if (!selectedFile) return;
+    const btnH = document.getElementById('btnHeatmap');
+    const btnRegen = document.getElementById('btnRegenHeatmap');
+    const section = document.getElementById('heatmapSection');
+
+    const target = btnRegen.style.display !== 'none' ? btnRegen : btnH;
+    target.disabled = true;
+    const origText = target.textContent;
+    target.innerHTML = '<span class="spinner"></span>生成中...';
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    if (label) formData.append('label', label);
+
+    try {
+        const res = await fetch(API_BASE + '/api/gradcam', { method: 'POST', body: formData });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        document.getElementById('heatmapOrig').src = document.getElementById('previewImage').src;
+        document.getElementById('heatmapOverlay').src = 'data:image/png;base64,' + data.heatmap;
+        const zh = LABEL_ZH[data.target_label] || data.target_label;
+        document.getElementById('heatmapCaption').textContent = `熱力圖：${zh} (${data.processing_time_ms.toFixed(0)}ms)`;
+        section.classList.add('show');
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (err) {
+        alert('熱力圖生成失敗：' + err.message);
+    } finally {
+        target.disabled = false;
+        target.textContent = origText;
+    }
+}
+
+document.getElementById('btnHeatmap').addEventListener('click', () => {
+    const label = document.getElementById('heatmapLabelSelect').value;
+    fetchHeatmap(label);
+});
+document.getElementById('btnRegenHeatmap').addEventListener('click', () => {
+    const label = document.getElementById('heatmapLabelSelect').value;
+    fetchHeatmap(label);
+});
 
 // === History ===
 async function loadHistory() {
