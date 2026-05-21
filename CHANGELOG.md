@@ -7,6 +7,38 @@
 
 ---
 
+## [0.5.0] - 2026-05-21
+
+### Added
+- **DICOM (.dcm) 格式支援**: pydicom 整合，自動偵測 DICOM 檔案
+  - `is_dicom()`: 檢查 DICM magic bytes 自動偵測 DICOM 格式
+  - `dicom_to_image()`: 灰階正規化 + 多通道處理，轉換為模型可用的 RGB 影像
+  - 前端: `.dcm` 格式 accept + DICOM 預覽 SVG placeholder
+  - `/api/predict` 和 `/api/gradcam` 均支援 DICOM 輸入
+- **手機版 RWD**: 24 條 responsive CSS rules，`@media (max-width: 640px)` 適配手機螢幕
+- **PDF 報告匯出**: jsPDF CDN 整合，一鍵產生報告
+  - 報告內容: 標題 + 最高信心診斷 + 15 種疾病信心度條狀圖 + 免責聲明
+  - 前端結果頁新增 PDF 匯出按鈕
+- **批次上傳**: 多檔案選擇器，循序 API 呼叫，即時進度顯示
+- **docker-compose.yml**: 本地開發一鍵啟動
+  - API (`:8000`) + Frontend (`:3000`) + PostgreSQL (`:5432`)
+  - Health checks、named volume (`pgdata`)
+- **start.bat**: Windows 一鍵啟動腳本
+  - 自動建立 venv → pip install → 啟動 uvicorn (`:8000`) + http.server (`:3000`)
+  - 不需要 Docker 或 PostgreSQL
+- **測試環境**: `ai-xray-test.avision-gb10.org` (NodePort 30081)
+  - 獨立 K8S deployments: `ai-xray-api-test`, `ai-xray-frontend-test`
+  - Cloudflare tunnel: `ai-xray-test.avision-gb10.org` → `192.168.49.2:30081`
+
+### Changed
+- **前端 API_BASE 自動偵測**: Frontend 在 `:3000` 執行時自動指向 API `:8000`，無需手動設定
+- **Input validation 加強**:
+  - 檔案大小上限: 50MB
+  - DICOM 副檔名檢查 (`.dcm`)
+- `api_build_onnx/requirements.txt` 新增 `pydicom>=2.4.0`
+
+---
+
 ## [0.4.0] - 2026-05-21
 
 ### Added

@@ -12,6 +12,9 @@
 - [資料預處理流程](#資料預處理流程)
 - [模型訓練指南](#模型訓練指南)
 - [後端 API 開發](#後端-api-開發)
+- [本地開發環境設定](#本地開發環境設定)
+- [測試環境](#測試環境)
+- [DICOM 處理](#dicom-處理)
 - [K8S 部署流程](#k8s-部署流程)
 - [Git 工作流程](#git-工作流程)
 - [除錯與排障](#除錯與排障)
@@ -332,8 +335,8 @@ export:
 
 ```
 api_build_onnx/
-├── main.py              # FastAPI app, ONNX 推論, PostgreSQL 寫入
-├── requirements.txt     # onnxruntime, fastapi, uvicorn, sqlalchemy, psycopg2-binary
+├── main.py              # FastAPI app, ONNX 推論, PostgreSQL 寫入, DICOM 支援
+├── requirements.txt     # onnxruntime, fastapi, uvicorn, sqlalchemy, psycopg2-binary, pydicom
 ├── Dockerfile           # CPU 版 (python:3.12-slim, 406MB)
 ├── Dockerfile.gpu       # GPU 版 (含 CUDA libs + onnxruntime-gpu, 598MB)
 └── models/
@@ -348,9 +351,11 @@ api_build_onnx/
 | Method | Path | 說明 |
 |--------|------|------|
 | GET | `/health` | 健康檢查 (model_loaded, db_ready, providers) |
-| POST | `/api/predict` | X 光片推論 (multipart file upload) |
-| POST | `/api/gradcam` | CAM 熱力圖 (multipart file upload + label) |
+| POST | `/api/predict` | X 光片推論 (multipart file upload, 支援 PNG/JPEG/DICOM) |
+| POST | `/api/gradcam` | CAM 熱力圖 (multipart file upload + label, 支援 PNG/JPEG/DICOM) |
 | GET | `/api/model/info` | 模型資訊 |
+
+> **Input validation**: 檔案大小上限 50MB，支援 DICOM 副檔名檢查 (`.dcm`)
 
 ### 資料庫連線
 
@@ -373,10 +378,69 @@ uvicorn main:app --reload --port 8000
 uvicorn main:app --workers 4 --port 8000
 ```
 
+### 本地開發環境設定
+
+#### 選項 A: Docker Compose (推薦)
+
+```bash
+# 一鍵啟動 API + Frontend + PostgreSQL
+docker-compose up --build
+
+# 服務:
+# - API:        http://localhost:8000
+# - Frontend:   http://localhost:3000
+# - PostgreSQL: localhost:5432
+```
+
+**docker-compose.yml 架構**:
+
+- `api` service: FastAPI + ONNX Runtime (`:8000`)
+- `frontend` service: 靜態 HTTP server (`:3000`)，API_BASE 自動指向 `http://localhost:8000`
+- `postgres` service: PostgreSQL 15 (`:5432`)，named volume `pgdata`
+- Health checks for all services
+
+#### 選項 B: Windows 一鍵啟動 (start.bat)
+
+```batch
+# 雙擊 start.bat 或在 cmd 執行
+start.bat
+```
+
+**start.bat 流程**:
+1. 自動建立 Python venv (若不存在)
+2. `pip install -r api_build_onnx/requirements.txt`
+3. 啟動 API: `uvicorn main:app --port 8000` (背景執行)
+4. 啟動 Frontend: `python -m http.server 3000` (背景執行)
+5. 不需要 Docker 或 PostgreSQL
+
+#### 前端 API_BASE 自動偵測
+
+Frontend 在 `:3000` 執行時，會自動將 API 請求指向 `http://localhost:8000`：
+```javascript
+const API_BASE = window.location.port === '3000'
+    ? 'http://localhost:8000'
+    : '';  // K8S 環境使用 nginx reverse proxy
+```
+
+### 測試環境
+
+dev 分支有獨立的測試環境部署：
+
+- **網址**: https://ai-xray-test.avision-gb10.org
+- **NodePort**: 30081
+- **K8S deployments**: `ai-xray-api-test` (image: `ai-xray-api:dicom`), `ai-xray-frontend-test`
+- **Cloudflare tunnel**: `ai-xray-test.avision-gb10.org` → `192.168.49.2:30081`
+
+> 測試環境與正式環境完全獨立，不共用 deployments 或 services。正式環境不受影響。
+
 ### 推論流程
 
 ```
-上傳影像 (PNG/JPG)
+上傳影像 (PNG/JPG/DICOM)
+    ↓
+DICOM 偵測 → is_dicom() 檢查 DICM magic bytes
+    ↓ (如果是 DICOM)
+dicom_to_image() → 灰階正規化 + 多通道處理 → PIL Image
     ↓
 PIL 開啟 → resize 224x224 → normalize (ImageNet mean/std)
     ↓
@@ -388,6 +452,25 @@ Sigmoid → 15 個機率值
     ↓
 排序 + 寫入 PostgreSQL
 ```
+
+### DICOM 處理
+
+DICOM 格式支援已整合到 `/api/predict` 和 `/api/gradcam` 端點，無需額外設定。
+
+**依賴**: `pydicom>=2.4.0` (已加入 `api_build_onnx/requirements.txt`)
+
+**處理流程**:
+
+1. **`is_dicom(file_bytes)`** — 讀取檔案前 132 bytes，檢查 offset 128 是否為 `DICM` magic bytes
+2. **`dicom_to_image(dicom_ds)`** — 解析 DICOM dataset：
+   - 取得 pixel array (`ds.pixel_array`)
+   - 灰階正規化: `(array - min) / (max - min) * 255`
+   - 多通道處理: 若原始為 RGB (samples per pixel > 1)，保留通道；否則單通道複製為 3 通道
+   - 回傳 PIL Image (RGB)
+
+**前端 DICOM 支援**:
+- `<input accept=".png,.jpg,.jpeg,.dcm">` — 允許選擇 `.dcm` 檔案
+- DICOM 上傳時顯示 SVG placeholder 預覽（因瀏覽器無法直接顯示 DICOM）
 
 ### CAM 熱力圖流程
 

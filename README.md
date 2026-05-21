@@ -24,9 +24,12 @@
 
 部署在 NVIDIA DGX Spark (GB10) 上的 Minikube K8S 叢集。
 
+> **支援格式**: PNG, JPEG, DICOM (.dcm) — DICOM 格式自動偵測與轉換（灰階正規化 + 多通道處理）
+
 ## 線上 Demo
 
-👉 **https://ai-x-ray-detection.avision-gb10.org**
+- 🏭 **Production**: 👉 **https://ai-x-ray-detection.avision-gb10.org**
+- 🧪 **Test (dev)**: 👉 **https://ai-xray-test.avision-gb10.org** (NodePort 30081)
 
 直接上傳胸腔 X 光片，即可獲得 14 種疾病的預測結果。也可使用 `data/test_images/` 中的 100 張範例影像進行測試。
 
@@ -44,6 +47,7 @@ curl -X POST https://ai-x-ray-detection.avision-gb10.org/api/predict \
 - **資料集**: NIH ChestX-ray14 ( 112,120 張正面胸腔 X 光片 )
 - **標籤數**: 15 ( 14 種疾病 + No Finding )
 - **輸入**: 224×224 RGB
+- **支援格式**: PNG, JPEG, DICOM (.dcm) — DICOM 自動偵測 (DICM magic) + 灰階正規化 + 多通道處理
 - **輸出**: 15 個 sigmoid 機率值 ( 多標籤分類 )
 - **Mean AUROC**: 0.812
 - **推論速度**: ~90ms/張 (CPU, ARM ONNX Runtime)
@@ -82,7 +86,9 @@ ai-xray-detection/
 ├── api/                   # 完整 API (含 DB, 認證等)
 ├── CHANGELOG.md
 ├── DEVELOPMENT.md
-└── TODO.md
+├── TODO.md
+├── docker-compose.yml        # Docker Compose 本地開發 (API + Frontend + PostgreSQL)
+└── start.bat                 # Windows 一鍵啟動 (auto venv + pip + uvicorn + http.server)
 ```
 
 ## 資料集
@@ -137,7 +143,32 @@ api_build_onnx/models/
 
 ## 快速開始
 
-### 前端 (Nginx)
+### 選項 A: Docker Compose (推薦)
+
+```bash
+# 一鍵啟動 API (:8000) + Frontend (:3000) + PostgreSQL (:5432)
+docker-compose up --build
+
+# 開啟瀏覽器
+# Frontend: http://localhost:3000
+# API:      http://localhost:8000/health
+```
+
+### 選項 B: Windows 一鍵啟動 (start.bat)
+
+```batch
+# 在 Windows 上雙擊 start.bat 即可
+# 自動建立 venv → pip install → 啟動 API (uvicorn :8000) + Frontend (http.server :3000)
+# 不需要 Docker 或 PostgreSQL
+
+start.bat
+# Frontend: http://localhost:3000
+# API:      http://localhost:8000/health
+```
+
+### 選項 C: K8S 部署 (生產環境)
+
+#### 前端 (Nginx)
 
 ```bash
 cd frontend
@@ -146,7 +177,7 @@ minikube image load ai-xray-frontend:latest
 kubectl apply -f k8s-frontend.yaml
 ```
 
-### API (FastAPI + ONNX)
+#### API (FastAPI + ONNX)
 
 ```bash
 cd api_build_onnx

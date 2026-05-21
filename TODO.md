@@ -25,6 +25,21 @@
   - CAM model: best_model_cam.onnx (relu_120 中間層, 1024×7×7)
   - ~345ms (含 heatmap 生成)
 - [x] 文件更新 (README, CHANGELOG, DEVELOPMENT, TODO)
+- [x] DICOM (.dcm) 格式支援
+  - pydicom 整合，is_dicom() 自動偵測 (DICM magic)
+  - dicom_to_image() 灰階正規化 + 多通道處理
+  - 前端 .dcm accept + SVG 預覽 placeholder
+  - /api/predict 和 /api/gradcam 均支援 DICOM
+- [x] 手機版 RWD (24 條 responsive CSS rules, max-width: 640px)
+- [x] 結果匯出 (PDF 報告)
+  - jsPDF CDN，標題 + 最高信心診斷 + 15 疾病條狀圖 + 免責聲明
+- [x] 支援批次上傳 (多檔案選擇器，循序 API 呼叫，即時進度)
+- [x] Input validation 加強 (50MB 檔案大小上限 + DICOM 副檔名檢查)
+- [x] 本地開發環境 (docker-compose.yml + start.bat)
+  - docker-compose: API (:8000) + Frontend (:3000) + PostgreSQL (:5432)
+  - start.bat: Windows 一鍵啟動，auto venv + pip + uvicorn + http.server
+  - 前端 API_BASE 自動偵測 (:3000 → :8000)
+- [x] 測試環境 ai-xray-test.avision-gb10.org (NodePort 30081, 獨立 K8S deployments)
 
 ## 暫緩 ⏸️
 
@@ -38,9 +53,8 @@
 ## 規劃中 📋
 
 - [ ] 前端優化
-  - 手機版 RWD 微調
-  - 支援批次上傳 (多張 X 光片)
-  - 結果匯出 (PDF 報告)
+  - 更多裝置適配 (平板)
+  - 結果歷史記錄 UI 優化
 - [ ] 模型改善
   - 多模型比較 (ResNet, EfficientNet)
   - Ensemble 推論
@@ -53,5 +67,4 @@
   - 自動化模型 retraining pipeline
 - [ ] 安全性
   - HTTPS 強制 (Cloudflare 已處理)
-  - Input validation 加強 (檢查是否為 X-ray 影像)
   - CORS 限制 (目前 allow_origins=["*"])
