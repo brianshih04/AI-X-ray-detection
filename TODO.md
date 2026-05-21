@@ -8,17 +8,22 @@
 - [x] 模型評估 + ONNX 匯出
 - [x] FastAPI 推論 API (ONNX Runtime, POST /api/predict)
 - [x] 前端 UI (深色主題, 拖曳上傳, 14 疾病條狀圖)
-- [x] Docker 容器化 (frontend 61.5MB + API 406MB)
-- [x] K8S 部署 (Minikube v1.35.1, containerd)
-- [x] Cloudflare Tunnel 外部存取
+- [x] 前端歷史記錄頁面 (GET /api/predictions, 表格呈現)
+- [x] Docker 容器化 (frontend + API 406MB)
+- [x] K8S 部署 (Minikube v1.35.1, containerd, 5 manifests)
+- [x] K8S Secret 管理 (DB 密碼不寫死在程式碼)
+- [x] Cloudflare Tunnel 外部存取 (frontend nginx → API proxy)
 - [x] PostgreSQL 整合 (預測結果儲存)
 - [x] E2E 測試通過 (CPU, ~90ms/張)
+- [x] ONNX 模型 commit 到 GitHub (28MB, 免重新訓練)
+- [x] 100 張測試影像 + NIH ChestX-ray14 下載指南
 - [x] ONNX Runtime GPU wheel 建置 (aarch64 + sm_121, 54MB)
 - [x] GPU Docker image 建置 (598MB)
+- [x] 文件更新 (README, CHANGELOG, DEVELOPMENT, TODO)
 
-## 進行中 🔧
+## 暫緩 ⏸️
 
-- [ ] GPU 推論部署
+- [ ] GPU 推論部署 (CPU 90ms 已夠快)
   - ✅ ONNX Runtime GPU wheel 已建 (v1.24.4, CUDA EP)
   - ✅ GPU Docker image 已建 (ai-xray-api:gpu, 598MB)
   - ❌ nvidia-device-plugin 無法在 minikube containerd 註冊 GPU resource
@@ -31,7 +36,6 @@
   - 手機版 RWD 微調
   - 支援批次上傳 (多張 X 光片)
   - 結果匯出 (PDF 報告)
-  - 預測歷史記錄查詢頁面
 - [ ] 模型改善
   - Grad-CAM 熱力圖 (視覺化模型關注區域)
   - 多模型比較 (ResNet, EfficientNet)
@@ -40,10 +44,10 @@
   - API Key 認證
   - Rate limiting
   - 批次預測 endpoint
-  - 歷史查詢 API
 - [ ] CI/CD Pipeline
   - GitHub Actions: lint → test → build → deploy
   - 自動化模型 retraining pipeline
 - [ ] 安全性
   - HTTPS 強制 (Cloudflare 已處理)
-  - Input validation 加強
+  - Input validation 加強 (檢查是否為 X-ray 影像)
+  - CORS 限制 (目前 allow_origins=["*"])
