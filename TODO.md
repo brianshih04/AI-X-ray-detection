@@ -40,6 +40,13 @@
   - start.bat: Windows 一鍵啟動，auto venv + pip + uvicorn + http.server
   - 前端 API_BASE 自動偵測 (:3000 → :8000)
 - [x] 測試環境 ai-xray-test.avision-gb10.org (NodePort 30081, 獨立 K8S deployments)
+- [x] CI/CD Pipeline (GitHub Actions)
+  - Lint: ruff check
+  - Test: pytest 29 tests × Python 3.10/3.11/3.12 (矩陣測試)
+  - Docker Build: Frontend (nginx:alpine) + API (python:3.12-slim) 驗證
+  - pip cache + Docker layer cache 加速
+  - push/PR to main, dev 自動觸發
+- [x] 單元測試 (29 pytest, mock ONNX session, DICOM + predict + gradcam + edge cases)
 
 ## 暫緩 ⏸️
 
@@ -52,19 +59,43 @@
 
 ## 規劃中 📋
 
-- [ ] 前端優化
-  - 更多裝置適配 (平板)
-  - 結果歷史記錄 UI 優化
-- [ ] 模型改善
-  - 多模型比較 (ResNet, EfficientNet)
-  - Ensemble 推論
-- [ ] API 完整版
-  - API Key 認證
-  - Rate limiting
-  - 批次預測 endpoint
-- [ ] CI/CD Pipeline
-  - GitHub Actions: lint → test → build → deploy
-  - 自動化模型 retraining pipeline
-- [ ] 安全性
-  - HTTPS 強制 (Cloudflare 已處理)
-  - CORS 限制 (目前 allow_origins=["*"])
+### 🔥 高優先
+
+- [ ] API Key 認證 + Rate limiting
+  - Header-based API Key (X-API-Key)
+  - FastAPI middleware + SQLite/PostgreSQL key store
+  - Rate limiting: per-key request quota (e.g. 100/min)
+  - 目前 API 完全公開，任何人都可呼叫
+- [ ] CORS 限制
+  - 目前 `allow_origins=["*"]`，改為白名單域名
+  - 允許: `ai-x-ray-detection.avision-gb10.org`, `ai-xray-test.avision-gb10.org`, `localhost`
+- [ ] 前端永久化部署
+  - ConfigMap 掛載 index.html (pod 重啟不丟失)
+  - 或 Init Container 從 git 拉取
+  - 目前 prod + test 皆用 kubectl cp 到 /tmp，pod 重啟就沒了
+
+### 📦 中優先
+
+- [ ] 前端 UI 優化
+  - 平板適配 (768px–1024px breakpoint)
+  - 歷史記錄分頁 + 篩選
+  - 深色/淺色主題切換
+- [ ] 批次預測 API endpoint
+  - POST /api/predict/batch (multipart, 多檔一次上傳)
+  - 目前前端批次是逐張呼叫，server 端批次可減少 overhead
+- [ ] Merge dev → main + 更新正式站
+  - DICOM, RWD, PDF, batch upload 部署到 production
+  - 重建 frontend Docker image (含最新 index.html)
+
+### 🔮 長期
+
+- [ ] 多模型比較 (ResNet, EfficientNet)
+  - 需重新訓練 + ONNX 匯出
+  - 前端模型選擇器 + 比較頁面
+- [ ] Ensemble 推論
+  - 多模型投票/加權平均
+  - 依賴多模型完成
+- [ ] 自動化模型 retraining pipeline
+  - 資料標注回饋迴路
+  - 定期 retrain + 效能比較
+  - 模型版本管理
