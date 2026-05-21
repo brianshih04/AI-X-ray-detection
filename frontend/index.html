@@ -486,7 +486,10 @@
 </div>
 
 <script>
-const API_BASE = window.location.origin;
+// Auto-detect API base: when frontend served from :3000 (local dev), point to API :8000
+const API_BASE = (window.location.port === '3000')
+    ? 'http://localhost:8000'
+    : window.location.origin;
 
 const LABEL_ZH = {
     'Atelectasis': '肺不張', 'Cardiomegaly': '心臟肥大', 'Consolidation': '肺實變',
