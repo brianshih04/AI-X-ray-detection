@@ -4,6 +4,7 @@ import io
 import os
 import time
 import uuid
+import struct
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -14,6 +15,7 @@ import onnxruntime as ort
 from onnx import numpy_helper
 from PIL import Image
 import cv2
+import pydicom
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -92,8 +94,45 @@ def load_model():
             break
     logger.info(f"CAM model loaded. Weights shape: {cam_weights.shape}")
 
+ALLOWED_TYPES = {"image/png", "image/jpeg", "image/jpg", "application/dicom"}
+
+def is_dicom(data: bytes) -> bool:
+    """Check if bytes look like a DICOM file."""
+    # DICM magic at offset 128
+    if len(data) > 132 and data[128:132] == b'DICM':
+        return True
+    # Some DICOM files don't have the preamble but start with group 0002
+    if len(data) > 4:
+        group = struct.unpack('<H', data[0:2])[0]
+        if group == 0x0002:
+            return True
+    return False
+
+def dicom_to_image(data: bytes) -> Image.Image:
+    """Convert DICOM bytes to PIL Image."""
+    ds = pydicom.dcmread(io.BytesIO(data))
+    arr = ds.pixel_array
+    if arr.ndim == 2:
+        arr = arr.astype(np.float64)
+        arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8) * 255
+        arr = arr.astype(np.uint8)
+        img = Image.fromarray(arr, mode='L').convert('RGB')
+    elif arr.ndim == 3:
+        if arr.shape[2] == 3:
+            img = Image.fromarray(arr.astype(np.uint8), mode='RGB')
+        elif arr.shape[2] == 4:
+            img = Image.fromarray(arr[:, :, :3].astype(np.uint8), mode='RGB')
+        else:
+            img = Image.fromarray(arr[:, :, 0].astype(np.uint8), mode='L').convert('RGB')
+    else:
+        raise ValueError(f"Unsupported DICOM pixel array shape: {arr.shape}")
+    return img
+
 def preprocess(file_bytes):
-    img = Image.open(io.BytesIO(file_bytes))
+    if is_dicom(file_bytes):
+        img = dicom_to_image(file_bytes)
+    else:
+        img = Image.open(io.BytesIO(file_bytes))
     if img.mode != "RGB":
         img = img.convert("RGB")
     img = img.resize((224, 224), Image.BILINEAR)
@@ -119,8 +158,8 @@ async def health():
 async def predict(file: UploadFile = File(...)):
     if session is None:
         raise HTTPException(503, "Model not loaded")
-    if file.content_type and file.content_type not in ("image/png", "image/jpeg", "image/jpg"):
-        raise HTTPException(400, "Use PNG or JPEG")
+    if file.content_type and file.content_type not in ALLOWED_TYPES:
+        raise HTTPException(400, "Use PNG, JPEG, or DICOM (.dcm)")
     file_bytes = await file.read()
     if len(file_bytes) > 50 * 1024 * 1024:
         raise HTTPException(413, "Image too large")
@@ -197,8 +236,8 @@ async def gradcam(file: UploadFile = File(...), label: str = None):
     """Generate Grad-CAM heatmap overlay for an X-ray image."""
     if cam_session is None or cam_weights is None:
         raise HTTPException(503, "CAM model not loaded")
-    if file.content_type and file.content_type not in ("image/png", "image/jpeg", "image/jpg"):
-        raise HTTPException(400, "Use PNG or JPEG")
+    if file.content_type and file.content_type not in ALLOWED_TYPES:
+        raise HTTPException(400, "Use PNG, JPEG, or DICOM (.dcm)")
     file_bytes = await file.read()
     if len(file_bytes) > 50 * 1024 * 1024:
         raise HTTPException(413, "Image too large")
@@ -221,7 +260,11 @@ async def gradcam(file: UploadFile = File(...), label: str = None):
     cam_resized = np.array(Image.fromarray(cam).resize((224, 224), Image.BILINEAR))
     heatmap = cv2.applyColorMap(np.uint8(255 * cam_resized), cv2.COLORMAP_JET)
     heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
-    orig = np.array(Image.open(io.BytesIO(file_bytes)).convert("RGB").resize((224, 224)))
+    # Get original image (handle both DICOM and regular images)
+    if is_dicom(file_bytes):
+        orig = np.array(dicom_to_image(file_bytes).resize((224, 224)))
+    else:
+        orig = np.array(Image.open(io.BytesIO(file_bytes)).convert("RGB").resize((224, 224)))
     overlay = np.float32(heatmap) * 0.4 + np.float32(orig) * 0.6
     overlay = np.clip(overlay, 0, 255).astype(np.uint8)
 
