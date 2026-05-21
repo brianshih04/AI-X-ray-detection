@@ -419,6 +419,18 @@
                 <button class="btn-remove" id="btnRemove">✕ 移除</button>
             </div>
             <img class="preview-image" id="previewImage" alt="X-ray preview">
+            <div id="dualImageContainer" style="display:none;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                    <div style="text-align:center;">
+                        <img id="dualOrigImg" style="width:100%;max-height:400px;object-fit:contain;border-radius:8px;background:#0f172a;" alt="Original X-ray">
+                        <div style="font-size:0.75rem;color:#64748b;margin-top:0.5rem;">原始 X 光片</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <img id="dualHeatmapImg" style="width:100%;max-height:400px;object-fit:contain;border-radius:8px;background:#0f172a;" alt="Heatmap">
+                        <div style="font-size:0.75rem;color:#f59e0b;margin-top:0.5rem;" id="dualHeatmapCaption">熱力圖疊加</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <button class="btn-predict" id="btnPredict">開始判讀</button>
@@ -595,8 +607,12 @@ btnRemove.addEventListener('click', () => {
     fileInput.value = '';
     previewContainer.classList.remove('show');
     btnPredict.classList.remove('show');
+    btnPredict.textContent = '開始判讀';
     uploadZone.style.display = '';
     resultsDiv.classList.remove('show');
+    // Reset preview to single image mode
+    document.getElementById('dualImageContainer').style.display = 'none';
+    document.getElementById('previewImage').style.display = '';
 });
 
 btnPredict.addEventListener('click', async () => {
@@ -613,6 +629,8 @@ btnPredict.addEventListener('click', async () => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         renderResults(data);
+        // Auto-fetch heatmap and show side-by-side
+        await fetchAndShowDualHeatmap(data.top_prediction);
     } catch (err) {
         alert('判讀失敗：' + err.message);
     } finally {
@@ -674,6 +692,36 @@ function renderResults(data) {
     });
 }
 
+// === Dual image display (original + heatmap side by side) ===
+async function fetchAndShowDualHeatmap(label) {
+    if (!selectedFile) return;
+    try {
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        if (label) formData.append('label', label);
+        const res = await fetch(API_BASE + '/api/gradcam', { method: 'POST', body: formData });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        // Switch from single preview to dual images
+        document.getElementById('previewImage').style.display = 'none';
+        const dualContainer = document.getElementById('dualImageContainer');
+        document.getElementById('dualOrigImg').src = document.getElementById('previewImage').src || URL.createObjectURL(selectedFile);
+        document.getElementById('dualHeatmapImg').src = 'data:image/png;base64,' + data.heatmap;
+        const zh = LABEL_ZH[data.target_label] || data.target_label;
+        document.getElementById('dualHeatmapCaption').textContent = '熱力圖：' + zh + ' (' + data.processing_time_ms.toFixed(0) + 'ms)';
+        dualContainer.style.display = 'block';
+
+        // Also populate the heatmap section for re-generation
+        document.getElementById('heatmapOrig').src = document.getElementById('dualOrigImg').src;
+        document.getElementById('heatmapOverlay').src = 'data:image/png;base64,' + data.heatmap;
+        document.getElementById('heatmapCaption').textContent = '熱力圖：' + zh + ' (' + data.processing_time_ms.toFixed(0) + 'ms)';
+    } catch (err) {
+        // If heatmap fails, just keep single preview - don't block results
+        console.warn('Heatmap fetch failed:', err.message);
+    }
+}
+
 // === Heatmap ===
 let lastPredictData = null;
 
@@ -727,55 +775,162 @@ document.getElementById('btnRegenHeatmap').addEventListener('click', () => {
 });
 
 // === PDF Export ===
-document.getElementById('btnPdf').addEventListener('click', () => {
+document.getElementById('btnPdf').addEventListener('click', async () => {
     if (!lastPredictData) return;
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 15;
+    let y = margin;
 
-    // Title
-    doc.setFontSize(18);
-    doc.text('Chest X-ray Analysis Report', pageW / 2, 20, { align: 'center' });
-    doc.setFontSize(10);
-    doc.setTextColor(128);
-    doc.text('AI X-ray Detection System | DenseNet-121 (NIH ChestX-ray14)', pageW / 2, 28, { align: 'center' });
-    doc.text('Generated: ' + new Date().toLocaleString('zh-TW'), pageW / 2, 34, { align: 'center' });
+    // Load Noto Sans TC for Chinese support
+    try {
+        const url = 'https://cdn.jsdelivr.net/npm/noto-sans-tc@1.0.0/NotoSansTC-Regular.otf';
+        const fontResp = await fetch(url);
+        if (fontResp.ok) {
+            const fontBlob = await fontResp.arrayBuffer();
+            const fontArray = Array.from(new Uint8Array(fontBlob));
+            doc.addFile_Variable('NotoSansTC', fontArray);
+            doc.addFont('NotoSansTC', 'NotoSansTC', 'normal');
+        }
+    } catch (e) {
+        console.warn('CJK font load failed:', e.message);
+    }
 
-    // Top prediction
+    // Helper: draw wrapped text and return new Y
+    function drawText(text, x, yy, maxW, lineH = 6) {
+        const lines = doc.splitTextToSize(text, maxW);
+        lines.forEach(line => {
+            if (yy > pageH - margin) { doc.addPage(); yy = margin; }
+            doc.text(line, x, yy);
+            yy += lineH;
+        });
+        return yy;
+    }
+
+    // ---- Header ----
+    doc.setFillColor(15, 23, 42);
+    doc.rect(0, 0, pageW, 28, 'F');
+    doc.setFontSize(16);
+    doc.setTextColor(200, 220, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.text('胸腔 X 光片 AI 判讀報告', pageW / 2, 12, { align: 'center' });
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(148, 163, 184);
+    doc.text('AI X-ray Detection System  |  DenseNet-121 (NIH ChestX-ray14)', pageW / 2, 19, { align: 'center' });
+    const genTime = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+    doc.text('產生時間：' + genTime, pageW / 2, 25, { align: 'center' });
+    y = 36;
+
+    // ---- Top Diagnosis ----
     const topLabel = lastPredictData.top_prediction;
     const topPct = (lastPredictData.top_confidence * 100).toFixed(1);
     const zhName = LABEL_ZH[topLabel] || topLabel;
-    doc.setFontSize(14);
-    doc.setTextColor(0);
-    doc.text('Top Diagnosis: ' + zhName + ' (' + topLabel + ')', 14, 46);
-    doc.setFontSize(24);
-    doc.text(topPct + '%', 14, 58);
 
-    // All results
+    doc.setFillColor(30, 58, 95);
+    doc.roundedRect(margin, y, pageW - margin * 2, 22, 4, 4, 'F');
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(96, 165, 250);
+    doc.text('最可能診斷', pageW / 2, y + 7, { align: 'center' });
+    doc.setFontSize(20);
+    doc.setTextColor(241, 245, 249);
+    doc.setFont('helvetica', 'bold');
+    doc.text(zhName + ' (' + topLabel + ')', pageW / 2, y + 15, { align: 'center' });
+    doc.setFontSize(28);
+    doc.setTextColor(52, 211, 153);
+    doc.text(topPct + '%', pageW - margin - 5, y + 16, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    y += 30;
+
+    // ---- Processing time ----
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text('處理時間：' + lastPredictData.processing_time_ms.toFixed(0) + ' ms', margin, y);
+    y += 8;
+
+    // ---- Images section ----
+    const origSrc = document.getElementById('dualOrigImg')?.src || document.getElementById('previewImage')?.src || '';
+    const heatmapSrc = document.getElementById('dualHeatmapImg')?.src || '';
+
+    const imgHalfW = (pageW - margin * 2 - 8) / 2;
+    const imgH = imgHalfW * 0.75;
+    const hasOrig = origSrc?.startsWith('data:image');
+    const hasHeatmap = heatmapSrc?.startsWith('data:image/png;base64,');
+
+    if (hasOrig || hasHeatmap) {
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(30, 41, 59);
+        y = drawText('影像分析', margin, y, pageW - margin * 2) + 4;
+        const col1X = margin;
+        const col2X = margin + imgHalfW + 8;
+        const imgY = y;
+        if (hasOrig) {
+            try {
+                doc.addImage(origSrc, 'JPEG', col1X, imgY, imgHalfW, imgH);
+                doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+                doc.setTextColor(100, 116, 139);
+                doc.text('原始 X 光片', col1X + imgHalfW / 2, imgY + imgH + 4, { align: 'center' });
+            } catch (e) {}
+        }
+        if (hasHeatmap) {
+            try {
+                doc.addImage(heatmapSrc, 'PNG', col2X, imgY, imgHalfW, imgH);
+                doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+                doc.setTextColor(245, 158, 11);
+                doc.text('熱力圖疊加', col2X + imgHalfW / 2, imgY + imgH + 4, { align: 'center' });
+            } catch (e) {}
+        }
+        y = imgY + imgH + 10;
+    }
+
+    // ---- All predictions table ----
+    if (y > pageH - 60) { doc.addPage(); y = margin; }
     doc.setFontSize(11);
-    doc.setTextColor(0);
-    doc.text('All Predictions:', 14, 70);
-    let y = 78;
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    y = drawText('完整預測結果', margin, y, pageW - margin * 2) + 4;
+
+    doc.setFillColor(241, 245, 249);
+    doc.rect(margin, y - 4, pageW - margin * 2, 8, 'F');
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(71, 85, 105);
+    doc.text('疾病名稱', margin + 2, y + 1);
+    doc.text('信心度', pageW - margin - 2, y + 1, { align: 'right' });
+    y += 6;
+
     lastPredictData.results.forEach(r => {
         const zh = LABEL_ZH[r.label] || r.label;
         const pct = (r.confidence * 100).toFixed(1);
-        doc.setFontSize(9);
-        doc.text(zh + ' (' + r.label + ')', 14, y);
-        doc.text(pct + '%', pageW - 14, y, { align: 'right' });
-        // Simple bar
-        const barW = (r.confidence * 100);
-        doc.setFillColor(200, 200, 200);
-        doc.rect(80, y - 3, 60, 4, 'F');
-        doc.setFillColor(59, 130, 246);
-        doc.rect(80, y - 3, barW * 0.6, 4, 'F');
-        y += 10;
-        if (y > 270) { doc.addPage(); y = 20; }
+        if (y > pageH - 10) { doc.addPage(); y = margin; }
+        doc.setFillColor(241, 245, 249);
+        doc.rect(margin, y, pageW - margin * 2, 7, 'F');
+        const barColor = r.confidence >= 0.7 ? [5, 150, 105] : r.confidence >= 0.4 ? [217, 119, 6] : [220, 38, 38];
+        doc.setFillColor(...barColor);
+        doc.rect(margin, y, (pageW - margin * 2) * r.confidence, 7, 'F');
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(30, 41, 59);
+        doc.text(zh, margin + 3, y + 5);
+        doc.text(pct + '%', pageW - margin - 3, y + 5, { align: 'right' });
+        y += 9;
     });
 
-    // Disclaimer
-    doc.setFontSize(8);
-    doc.setTextColor(180);
-    doc.text('DISCLAIMER: For academic research only. NOT for clinical diagnosis.', pageW / 2, 285, { align: 'center' });
+    // ---- Disclaimer ----
+    y = Math.max(y + 8, pageH - 20);
+    doc.setFillColor(241, 245, 249);
+    doc.rect(margin, y, pageW - margin * 2, 14, 'F');
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(220, 38, 38);
+    doc.text('⚠ 免責聲明', margin + 2, y + 5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text('本系統僅供學術研究與技術展示用途，不得作為臨床診斷依據。模型：DenseNet-121 (NIH ChestX-ray14) 平均 AUROC: 0.812', margin + 2, y + 10);
 
     doc.save('xray-report-' + Date.now() + '.pdf');
 });
