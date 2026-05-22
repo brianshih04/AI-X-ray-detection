@@ -96,6 +96,9 @@ class ChestXrayClassifier(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         features = self.backbone(x)
+        # Ensure features are 2D: (B, C, H, W) -> (B, C)
+        if features.dim() > 2:
+            features = features.flatten(2).mean(dim=2)  # Global average pooling
         return self.classifier(features)
 
     def freeze_backbone(self):
