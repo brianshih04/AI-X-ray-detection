@@ -246,11 +246,20 @@ def main():
 
     # ── Build Loss ─────────────────────────────────────
     criterion = build_loss(cfg)
-    if cfg.get("loss", {}).get("use_pos_weight", False):
+    loss_type = cfg.get("loss", {}).get("type", "bce")
+    
+    if cfg.get("loss", {}).get("use_pos_weight", False) or loss_type == "asl_weighted":
         logger.info("Computing positive weights from training data...")
         pos_weights = compute_pos_weights(train_loader, model.num_classes, device)
         logger.info(f"  pos_weight range: {pos_weights.min().item():.2f} - {pos_weights.max().item():.2f}")
-        criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weights)
+        
+        if loss_type == "asl_weighted":
+            # ASL with class weighting
+            criterion.pos_weight = pos_weights.to(device)
+            logger.info("  Using ASL with pos_weight for class imbalance")
+        else:
+            # Standard BCE with pos_weight
+            criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weights)
 
     # ── Build Optimizer ───────────────────────────────
     train_cfg = cfg["training"]

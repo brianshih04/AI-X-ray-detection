@@ -32,11 +32,23 @@ def get_transforms(cfg_aug, img_size: int, split: str = "train"):
     normalize = transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
 
     if split == "train":
-        ops = [transforms.Resize((img_size, img_size))]
+        ops = []
+        
+        # Use RandomResizedCrop instead of fixed Resize for scale jitter
+        use_rrc = cfg_aug.get("random_resized_crop", True)
+        if use_rrc:
+            ops.append(transforms.RandomResizedCrop(
+                img_size, scale=cfg_aug.get("rrc_scale", (0.8, 1.0)),
+                ratio=cfg_aug.get("rrc_ratio", (0.9, 1.1)),
+                interpolation=transforms.InterpolationMode.BILINEAR,
+            ))
+        else:
+            ops.append(transforms.Resize((img_size, img_size)))
 
         if cfg_aug.get("random_horizontal_flip", 0.5) > 0:
             ops.append(transforms.RandomHorizontalFlip(p=cfg_aug["random_horizontal_flip"]))
 
+        # RandomAffine for geometric augmentation
         if cfg_aug.get("random_affine", False):
             ops.append(transforms.RandomAffine(
                 degrees=cfg_aug.get("random_rotation", 10),
@@ -44,18 +56,30 @@ def get_transforms(cfg_aug, img_size: int, split: str = "train"):
                 scale=cfg_aug.get("random_scale", [0.9, 1.1]),
             ))
 
+        # Color jitter — separate brightness/contrast for X-ray
         if cfg_aug.get("color_jitter", 0) > 0:
             ops.append(transforms.ColorJitter(
                 brightness=cfg_aug["color_jitter"],
-                contrast=cfg_aug["color_jitter"],
+                contrast=cfg_aug.get("contrast_jitter", cfg_aug["color_jitter"]),
+            ))
+
+        # Gaussian blur — simulates X-ray noise/sharpness variation
+        if cfg_aug.get("gaussian_blur", 0) > 0:
+            ops.append(transforms.GaussianBlur(
+                kernel_size=cfg_aug.get("blur_kernel", 5),
+                sigma=cfg_aug.get("blur_sigma", (0.1, 2.0)),
             ))
 
         ops.extend([
             transforms.ToTensor(),
             normalize,
         ])
+        
         if cfg_aug.get("random_erasing", 0) > 0:
-            ops.append(transforms.RandomErasing(p=cfg_aug["random_erasing"]))
+            ops.append(transforms.RandomErasing(
+                p=cfg_aug["random_erasing"],
+                scale=cfg_aug.get("erasing_scale", (0.02, 0.15)),
+            ))
 
         return transforms.Compose(ops)
 

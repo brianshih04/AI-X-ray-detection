@@ -212,7 +212,14 @@ async def health():
             "providers": session.get_providers() if session else []}
 
 @app.post("/api/predict")
-async def predict(file: UploadFile = File(...), _auth=Depends(api_key_auth)):
+async def predict(file: UploadFile = File(...), threshold: float = 0.5, _auth=Depends(api_key_auth)):
+    """Predict chest X-ray findings with adjustable threshold.
+
+    Args:
+        threshold: Confidence threshold (0.0-1.0) for positive findings. Default 0.5.
+                   All labels above this value are reported as positive findings.
+    """
+    threshold = max(0.0, min(1.0, threshold))
     if session is None:
         raise HTTPException(503, "Model not loaded")
     if file.content_type and file.content_type not in ALLOWED_TYPES:
@@ -231,6 +238,14 @@ async def predict(file: UploadFile = File(...), _auth=Depends(api_key_auth)):
     results = [{"label": lbl, "confidence": round(float(p), 4)} for lbl, p in zip(LABELS, probs)]
     results.sort(key=lambda x: x["confidence"], reverse=True)
     top = results[0]
+
+    # Multi-label: find all positive findings above threshold
+    positive_findings = [r for r in results if r["confidence"] >= threshold and r["label"] != "No_Finding"]
+
+    # If nothing exceeds threshold, report top finding anyway
+    if not positive_findings:
+        positive_findings = [top]
+
     if db_ready:
         try:
             s = SessionLocal()
@@ -240,13 +255,15 @@ async def predict(file: UploadFile = File(...), _auth=Depends(api_key_auth)):
                 top_prediction=top["label"], top_confidence=top["confidence"],
                 all_results=results, processing_time_ms=round(elapsed_ms, 2)))
             s.commit()
-            logger.info(f"Saved: {top['label']} ({top['confidence']:.2%})")
+            logger.info(f"Saved: {top['label']} ({top['confidence']:.2%}) | {len(positive_findings)} findings @ threshold={threshold}")
         except Exception as e:
             logger.warning(f"DB write failed: {e}")
         finally:
             s.close()
     return {"results": results, "top_prediction": top["label"],
-            "top_confidence": top["confidence"], "processing_time_ms": round(elapsed_ms, 2)}
+            "top_confidence": top["confidence"], "threshold": threshold,
+            "positive_findings": positive_findings,
+            "processing_time_ms": round(elapsed_ms, 2)}
 
 @app.get("/api/model/info")
 async def model_info(_auth=Depends(api_key_auth)):

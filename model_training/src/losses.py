@@ -1,10 +1,12 @@
 """
-Loss Functions: BCEWithLogitsLoss and FocalLoss for multi-label classification.
+Loss Functions: BCEWithLogitsLoss, FocalLoss, and ASL for multi-label classification.
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from .asymmetric_loss import AsymmetricLoss, AsymmetricLossOptimized
 
 
 class FocalLoss(nn.Module):
@@ -33,7 +35,10 @@ class FocalLoss(nn.Module):
 
 
 def build_loss(cfg) -> nn.Module:
-    """Build loss function from config."""
+    """Build loss function from config.
+    
+    Supported: bce, focal, asl, asl_weighted
+    """
     loss_cfg = cfg.get("loss", {})
     loss_type = loss_cfg.get("type", "bce")
 
@@ -42,6 +47,22 @@ def build_loss(cfg) -> nn.Module:
             alpha=loss_cfg.get("focal_alpha", 0.25),
             gamma=loss_cfg.get("focal_gamma", 2.0),
         )
+    elif loss_type == "asl":
+        return AsymmetricLoss(
+            gamma_neg=loss_cfg.get("asl_gamma_neg", 4.0),
+            gamma_pos=loss_cfg.get("asl_gamma_pos", 0.0),
+            clip=loss_cfg.get("asl_clip", 0.05),
+        )
+    elif loss_type == "asl_weighted":
+        # ASL with pos_weight — set later in train.py
+        return AsymmetricLossOptimized(
+            gamma_neg=loss_cfg.get("asl_gamma_neg", 4.0),
+            gamma_pos=loss_cfg.get("asl_gamma_pos", 1.0),
+            clip=loss_cfg.get("asl_clip", 0.05),
+            pos_weight=None,
+        )
+    elif loss_type == "bce_with_logits":
+        return nn.BCEWithLogitsLoss()
     elif loss_type == "bce":
         return nn.BCEWithLogitsLoss()
     else:

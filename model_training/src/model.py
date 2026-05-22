@@ -27,6 +27,8 @@ class ChestXrayClassifier(nn.Module):
         "densenet121": (models.densenet121, "IMAGENET1K_V1"),
         "efficientnet_b0": (models.efficientnet_b0, "IMAGENET1K_V1"),
         "efficientnet_b3": (models.efficientnet_b3, "IMAGENET1K_V1"),
+        "convnext_tiny": (models.convnext_tiny, "IMAGENET1K_V1"),
+        "convnext_small": (models.convnext_small, "IMAGENET1K_V1"),
     }
 
     def __init__(
@@ -77,6 +79,10 @@ class ChestXrayClassifier(nn.Module):
             self.backbone.classifier = nn.Identity()
         elif backbone_name.startswith("efficientnet"):
             num_features = self.backbone.classifier[1].in_features
+            self.backbone.classifier = nn.Identity()
+        elif backbone_name.startswith("convnext"):
+            # ConvNeXt classifier: Sequential(LayerNorm2d, Flatten, Linear)
+            num_features = self.backbone.classifier[-1].in_features
             self.backbone.classifier = nn.Identity()
         return num_features
 
